@@ -60,7 +60,7 @@ function handleHands(hands, timestamp) {
 }
 
 function renderFrame() {
-  sceneManager.update(latestGestureState);
+  sceneManager.update(latestGestureState, latestHands);
   hud.render(latestHands, video, debugState);
   requestAnimationFrame(renderFrame);
 }

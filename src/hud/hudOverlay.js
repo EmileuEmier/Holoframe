@@ -217,12 +217,13 @@ export class HudOverlay {
       for (const hand of gestureHands) {
         const state = this.getGestureState(hand);
         const score = Number(hand.lShapeScore ?? 0);
+        const victoryScore = Number(hand.victoryScore ?? 0);
         const angle = Number(hand.angleDegrees ?? 0);
         const facingValue = Number(hand.facingValue ?? 0);
         const fingers = hand.fingerScores ?? [];
 
         ctx.fillText(
-          `${hand.handedness} ${state}  L ${score.toFixed(2)}  ang ${angle.toFixed(0)}deg  fv ${facingValue.toFixed(2)}`,
+          `${hand.handedness} id ${hand.id ?? '-'} ${state}  L ${score.toFixed(2)}  V ${hand.victory ? 'yes' : 'no'} ${victoryScore.toFixed(2)}  ang ${angle.toFixed(0)}deg  fv ${facingValue.toFixed(2)}`,
           padding,
           y,
         );
@@ -255,6 +256,19 @@ export class HudOverlay {
     );
     y += lineHeight;
     ctx.fillText(`  ${frameText}`, padding, y);
+    y += lineHeight;
+
+    const victoryCorners = gestureState?.victoryCorners;
+    if (victoryCorners && victoryCorners.length >= 3) {
+      const c0 = victoryCorners[0];
+      const c1 = victoryCorners[1];
+      const c2 = victoryCorners[2];
+      ctx.fillText(
+        `tri (${c0.x.toFixed(0)},${c0.y.toFixed(0)}) (${c1.x.toFixed(0)},${c1.y.toFixed(0)}) (${c2.x.toFixed(0)},${c2.y.toFixed(0)})`,
+        padding,
+        y,
+      );
+    }
 
     ctx.restore();
   }

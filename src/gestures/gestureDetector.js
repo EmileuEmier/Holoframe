@@ -83,6 +83,7 @@ export class GestureDetector {
       openPalm: false,
       fist: false,
       victory: false,
+      victoryScore: 0,
       lShape: false,
       lShapeScore: 0,
       angleDegrees: 0,
@@ -785,6 +786,7 @@ export class GestureDetector {
         state.smoothedScores.victory,
         timestamp,
       );
+      output.victoryScore = state.smoothedScores.victory;
       output.lShape = this.updateHysteresis(
         state.states.lShape,
         state.smoothedScores.lShape,

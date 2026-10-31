@@ -78,6 +78,25 @@ const config = {
     swapHysteresis: 0.1,
   },
 
+  victory: {
+    // One shard per hand slot; slot colors stay attached to persistent hand ids.
+    maxShards: 2,
+    colors: ['#b84dff', '#3a6bff'],
+    fadeSpeed: 10,
+    // 0 means no extra smoothing; the landmarks are already One Euro smoothed.
+    motionSmoothing: 40,
+    fillOpacity: 0.55,
+    lineOpacity: 0.9,
+    lineWhiten: 0.5,
+    glowScale: 1.15,
+    glowOpacity: 0.35,
+    requireThumbExtended: false,
+    thumbExtendedThreshold: 0.6,
+    // Keep a hand's shard/color through short tracking dropouts.
+    idTtlMs: 250,
+    gradientSize: 64,
+  },
+
   scene: {
     maxDevicePixelRatio: 2,
     framePanel: {

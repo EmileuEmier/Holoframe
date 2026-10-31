@@ -11,6 +11,7 @@ const INDEX_TIP = 8;
 const MIDDLE_MCP = 9;
 const MIDDLE_TIP = 12;
 const RING_TIP = 16;
+const PINKY_MCP = 17;
 const PINKY_TIP = 20;
 
 // joint is the PIP (or MCP for the thumb) used in the distance comparison.
@@ -23,17 +24,6 @@ const FINGERS = [
 ];
 
 const GESTURE_NAMES = ['openPalm', 'fist', 'victory', 'lShape'];
-
-// All cyclic orders starting at corner A. Used to pick a non-self-intersecting
-// quad when the hand orientation makes the nominal order cross itself.
-const QUAD_PERMUTATIONS = [
-  [0, 1, 2, 3],
-  [0, 1, 3, 2],
-  [0, 2, 1, 3],
-  [0, 2, 3, 1],
-  [0, 3, 1, 2],
-  [0, 3, 2, 1],
-];
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -63,32 +53,6 @@ function copyPoint(target, source) {
   return target;
 }
 
-function cross(a, b, c) {
-  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-}
-
-function segmentsIntersect(a, b, c, d) {
-  const abC = cross(a, b, c);
-  const abD = cross(a, b, d);
-  const cdA = cross(c, d, a);
-  const cdB = cross(c, d, b);
-  return abC * abD < 0 && cdA * cdB < 0;
-}
-
-function isSelfIntersecting(a, b, c, d) {
-  return segmentsIntersect(a, b, c, d) || segmentsIntersect(b, c, d, a);
-}
-
-function polygonArea(points, order) {
-  let area = 0;
-  for (let i = 0; i < order.length; i += 1) {
-    const current = points[order[i]];
-    const next = points[order[(i + 1) % order.length]];
-    area += current.x * next.y - next.x * current.y;
-  }
-  return Math.abs(area) * 0.5;
-}
-
 export class GestureDetector {
   constructor(options = config.gestures) {
     this.options = options;
@@ -106,6 +70,7 @@ export class GestureDetector {
     };
     this.fingerScores = [0, 0, 0, 0, 0];
     this.angleDegrees = 0;
+    this.facingValue = 0;
     this.fallbackPoints = Array.from({ length: LANDMARK_COUNT }, () => ({
       x: 0,
       y: 0,
@@ -121,18 +86,32 @@ export class GestureDetector {
       lShape: false,
       lShapeScore: 0,
       angleDegrees: 0,
+      facingValue: 0,
+      facingSign: 0,
       fingerScores: [0, 0, 0, 0, 0],
     }));
 
-    this.quadPoints = Array.from({ length: 4 }, () => ({ x: 0, y: 0, z: 0 }));
+    // Raw endpoints are kept in role order: A0/A1 and B0/B1. frameCorners is
+    // the blended ring that gets rendered and mapped to screen space.
+    this.a0 = { x: 0, y: 0, z: 0 };
+    this.a1 = { x: 0, y: 0, z: 0 };
+    this.b0 = { x: 0, y: 0, z: 0 };
+    this.b1 = { x: 0, y: 0, z: 0 };
     this.frameCorners = Array.from({ length: 4 }, () => ({ x: 0, y: 0, z: 0 }));
-    this.handOrder = { left: 0, right: 1 };
     this.orientationState = { stable: null, candidate: null, candidateSince: 0 };
     this.frameState = {
       active: false,
       enterStartedAt: null,
       exitStartedAt: null,
       lastDistance: 0,
+      idA: null,
+      idB: null,
+      facingA: 0,
+      facingB: 0,
+      baseSwap: false,
+      folded: false,
+      twist: 0,
+      lastTimestamp: null,
     };
 
     this.result = {
@@ -143,6 +122,11 @@ export class GestureDetector {
         frameCorners: null,
         orientation: null,
         score: 0,
+        twist: 0,
+        folded: false,
+        facing: [0, 0],
+        idA: null,
+        idB: null,
       },
     };
   }
@@ -165,6 +149,9 @@ export class GestureDetector {
       states,
       lastScoreTimestamp: null,
       lastSeen: 0,
+      facingSign: 0,
+      facingCandidate: 0,
+      facingSince: 0,
     };
   }
 
@@ -199,6 +186,74 @@ export class GestureDetector {
       }
     }
     return points;
+  }
+
+  computeFacingValue(hand, aspectRatio) {
+    const landmarks = hand.landmarks;
+    if (!landmarks) return 0;
+
+    const wrist = landmarks[WRIST];
+    const indexMcp = landmarks[INDEX_MCP];
+    const middleMcp = landmarks[MIDDLE_MCP];
+    const pinkyMcp = landmarks[PINKY_MCP];
+    if (!wrist || !indexMcp || !middleMcp || !pinkyMcp) return 0;
+
+    // Aspect-correct x before the 2D cross product. The sign is unchanged, but
+    // the magnitude becomes scale-independent in screen space.
+    const indexX = (indexMcp.x - wrist.x) * aspectRatio;
+    const indexY = indexMcp.y - wrist.y;
+    const pinkyX = (pinkyMcp.x - wrist.x) * aspectRatio;
+    const pinkyY = pinkyMcp.y - wrist.y;
+    const middleX = (middleMcp.x - wrist.x) * aspectRatio;
+    const middleY = middleMcp.y - wrist.y;
+    const scaleSquared = middleX * middleX + middleY * middleY;
+
+    if (scaleSquared <= 1e-12) return 0;
+    return (indexX * pinkyY - indexY * pinkyX) / scaleSquared;
+  }
+
+  updateFacing(state, facingValue, timestamp) {
+    if (!Number.isFinite(facingValue)) return state.facingSign;
+
+    const { facingMinMagnitude, facingMs } = config.frame;
+    const magnitude = Math.abs(facingValue);
+    const sign = facingValue >= 0 ? 1 : -1;
+
+    if (state.facingSign === 0) {
+      if (magnitude > facingMinMagnitude) {
+        state.facingSign = sign;
+        state.facingCandidate = 0;
+        state.facingSince = timestamp;
+      }
+      return state.facingSign;
+    }
+
+    // Edge-on hands are ambiguous. Keep the old sign instead of flickering.
+    if (magnitude <= facingMinMagnitude) {
+      state.facingCandidate = 0;
+      state.facingSince = timestamp;
+      return state.facingSign;
+    }
+
+    if (sign === state.facingSign) {
+      state.facingCandidate = 0;
+      state.facingSince = timestamp;
+      return state.facingSign;
+    }
+
+    if (sign !== state.facingCandidate) {
+      state.facingCandidate = sign;
+      state.facingSince = timestamp;
+      return state.facingSign;
+    }
+
+    if (timestamp - state.facingSince >= facingMs) {
+      state.facingSign = sign;
+      state.facingCandidate = 0;
+      state.facingSince = timestamp;
+    }
+
+    return state.facingSign;
   }
 
   computeAngleScore(angle) {
@@ -394,67 +449,72 @@ export class GestureDetector {
     return state.stable;
   }
 
-  orderHandsByWristX(hands) {
-    const order = this.handOrder;
-    const firstX = hands[0].landmarks[WRIST].x;
-    const secondX = hands[1].landmarks[WRIST].x;
-
-    if (firstX <= secondX) {
-      order.left = 0;
-      order.right = 1;
-    } else {
-      order.left = 1;
-      order.right = 0;
-    }
-
-    return order;
+  copySideEndpoints(handA, handB) {
+    copyPoint(this.a0, handA.landmarks[THUMB_TIP]);
+    copyPoint(this.a1, handA.landmarks[INDEX_TIP]);
+    copyPoint(this.b0, handB.landmarks[THUMB_TIP]);
+    copyPoint(this.b1, handB.landmarks[INDEX_TIP]);
   }
 
-  updateFrameGeometry(hands, leftIndex, rightIndex, aspectRatio) {
-    const leftHand = hands[leftIndex];
-    const rightHand = hands[rightIndex];
+  computeCosAB(aspectRatio) {
+    const vAx = (this.a1.x - this.a0.x) * aspectRatio;
+    const vAy = this.a1.y - this.a0.y;
+    const vBx = (this.b1.x - this.b0.x) * aspectRatio;
+    const vBy = this.b1.y - this.b0.y;
+    const lengthA = Math.hypot(vAx, vAy);
+    const lengthB = Math.hypot(vBx, vBy);
 
-    copyPoint(this.quadPoints[0], leftHand.landmarks[THUMB_TIP]);
-    copyPoint(this.quadPoints[1], leftHand.landmarks[INDEX_TIP]);
-    copyPoint(this.quadPoints[2], rightHand.landmarks[INDEX_TIP]);
-    copyPoint(this.quadPoints[3], rightHand.landmarks[THUMB_TIP]);
+    if (lengthA <= 1e-6 || lengthB <= 1e-6) return 0;
+    return clamp(
+      (vAx * vBx + vAy * vBy) / (lengthA * lengthB),
+      -1,
+      1,
+    );
+  }
 
-    let bestOrder = QUAD_PERMUTATIONS[0];
-    let bestArea = -Infinity;
-    for (const order of QUAD_PERMUTATIONS) {
-      const a = this.quadPoints[order[0]];
-      const b = this.quadPoints[order[1]];
-      const c = this.quadPoints[order[2]];
-      const d = this.quadPoints[order[3]];
-      if (isSelfIntersecting(a, b, c, d)) continue;
-
-      const area = polygonArea(this.quadPoints, order);
-      if (area > bestArea) {
-        bestArea = area;
-        bestOrder = order;
-      }
+  updateBaseSwap(cosAB) {
+    const hysteresis = config.frame.swapHysteresis;
+    if (this.frameState.baseSwap) {
+      if (cosAB > hysteresis) this.frameState.baseSwap = false;
+    } else if (cosAB < -hysteresis) {
+      this.frameState.baseSwap = true;
     }
+  }
 
-    for (let i = 0; i < 4; i += 1) {
-      copyPoint(this.frameCorners[i], this.quadPoints[bestOrder[i]]);
-    }
+  computeWantFold() {
+    const { facingA, facingB } = this.frameState;
+    return facingA !== 0 && facingA === facingB;
+  }
 
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const point of this.frameCorners) {
-      minX = Math.min(minX, point.x);
-      maxX = Math.max(maxX, point.x);
-      minY = Math.min(minY, point.y);
-      maxY = Math.max(maxY, point.y);
-    }
+  computeRawOrientation(aspectRatio) {
+    const minX = Math.min(this.a0.x, this.a1.x, this.b0.x, this.b1.x);
+    const maxX = Math.max(this.a0.x, this.a1.x, this.b0.x, this.b1.x);
+    const minY = Math.min(this.a0.y, this.a1.y, this.b0.y, this.b1.y);
+    const maxY = Math.max(this.a0.y, this.a1.y, this.b0.y, this.b1.y);
 
     // Normalized width is scaled by the video aspect so the orientation matches
     // the on-screen panel rather than the raw 0..1 landmark space.
     const width = (maxX - minX) * aspectRatio;
     const height = maxY - minY;
     return width > height ? 'horizontal' : 'vertical';
+  }
+
+  updateFrameCorners(twist) {
+    const s = clamp01(twist);
+    copyPoint(this.frameCorners[0], this.a0);
+    copyPoint(this.frameCorners[1], this.a1);
+
+    // B1' = lerp(B1, B0, s), B0' = lerp(B0, B1, s). At s=0 the ring is the
+    // nominal order; at s=1 side B is swapped.
+    const b1Prime = this.frameCorners[2];
+    b1Prime.x = this.b1.x + (this.b0.x - this.b1.x) * s;
+    b1Prime.y = this.b1.y + (this.b0.y - this.b1.y) * s;
+    b1Prime.z = this.b1.z + (this.b0.z - this.b1.z) * s;
+
+    const b0Prime = this.frameCorners[3];
+    b0Prime.x = this.b0.x + (this.b1.x - this.b0.x) * s;
+    b0Prime.y = this.b0.y + (this.b1.y - this.b0.y) * s;
+    b0Prime.z = this.b0.z + (this.b1.z - this.b0.z) * s;
   }
 
   updateTwoHands(hands, handResults, aspectRatio, timestamp) {
@@ -464,27 +524,62 @@ export class GestureDetector {
 
     let frameScore = 0;
     let currentDistance = 0;
-    let leftIndex = -1;
-    let rightIndex = -1;
+    let handA = null;
+    let handB = null;
+    let resultA = null;
+    let resultB = null;
 
-    if (hasTwoHands) {
-      const order = this.orderHandsByWristX(hands);
-      leftIndex = order.left;
-      rightIndex = order.right;
-      frameScore = Math.min(
-        handResults[leftIndex].lShapeScore,
-        handResults[rightIndex].lShapeScore,
-      );
-      currentDistance = distance2D(
-        hands[leftIndex].landmarks[WRIST],
-        hands[rightIndex].landmarks[WRIST],
-      );
+    if (!frameState.active) {
+      // At activation, A is the hand with the smaller wrist x. The ids are then
+      // frozen so crossing arms or close wrists cannot swap the sides later.
+      if (hasTwoHands) {
+        const first = hands[0];
+        const second = hands[1];
+        if (first.landmarks[WRIST].x <= second.landmarks[WRIST].x) {
+          handA = first;
+          resultA = handResults[0];
+          handB = second;
+          resultB = handResults[1];
+        } else {
+          handA = second;
+          resultA = handResults[1];
+          handB = first;
+          resultB = handResults[0];
+        }
+
+        frameScore = Math.min(resultA.lShapeScore, resultB.lShapeScore);
+        currentDistance = distance2D(
+          handA.landmarks[WRIST],
+          handB.landmarks[WRIST],
+        );
+      }
+    } else if (frameState.idA !== null && frameState.idB !== null) {
+      // While active, look up the same two ids. A new id is ignored until the
+      // frame fully deactivates and the activation path runs again.
+      for (let i = 0; i < hands.length && i < handResults.length; i += 1) {
+        const id = hands[i].id;
+        if (id === frameState.idA) {
+          handA = hands[i];
+          resultA = handResults[i];
+        } else if (id === frameState.idB) {
+          handB = hands[i];
+          resultB = handResults[i];
+        }
+      }
+
+      if (handA && handB) {
+        frameScore = Math.min(resultA.lShapeScore, resultB.lShapeScore);
+        currentDistance = distance2D(
+          handA.landmarks[WRIST],
+          handB.landmarks[WRIST],
+        );
+      }
     }
 
     twoHands.score = frameScore;
 
     if (!frameState.active) {
-      if (hasTwoHands && frameScore > this.options.enterThreshold) {
+      if (handA && handB && frameScore > this.options.enterThreshold) {
         if (frameState.enterStartedAt === null) {
           frameState.enterStartedAt = timestamp;
         }
@@ -492,14 +587,26 @@ export class GestureDetector {
           frameState.active = true;
           frameState.enterStartedAt = null;
           frameState.exitStartedAt = null;
-
-          const rawOrientation = this.updateFrameGeometry(
-            hands,
-            leftIndex,
-            rightIndex,
-            aspectRatio,
-          );
+          frameState.idA = handA.id;
+          frameState.idB = handB.id;
+          frameState.facingA = resultA.facingSign;
+          frameState.facingB = resultB.facingSign;
           frameState.lastDistance = currentDistance;
+          frameState.lastTimestamp = timestamp;
+
+          this.copySideEndpoints(handA, handB);
+          const cosAB = this.computeCosAB(aspectRatio);
+          frameState.baseSwap = cosAB < 0;
+
+          const wantFold = this.computeWantFold();
+          const swapB = wantFold ? !frameState.baseSwap : frameState.baseSwap;
+          frameState.folded = wantFold;
+          // Start in the correct flat/folded state instead of untwisting on
+          // the first visible frame.
+          frameState.twist = swapB ? 1 : 0;
+          this.updateFrameCorners(frameState.twist);
+
+          const rawOrientation = this.computeRawOrientation(aspectRatio);
 
           twoHands.active = true;
           twoHands.distance = currentDistance;
@@ -509,6 +616,12 @@ export class GestureDetector {
             timestamp,
             true,
           );
+          twoHands.twist = frameState.twist;
+          twoHands.folded = wantFold;
+          twoHands.facing[0] = frameState.facingA;
+          twoHands.facing[1] = frameState.facingB;
+          twoHands.idA = frameState.idA;
+          twoHands.idB = frameState.idB;
           return;
         }
       } else {
@@ -519,24 +632,59 @@ export class GestureDetector {
       twoHands.distance = 0;
       twoHands.frameCorners = null;
       twoHands.orientation = null;
+      twoHands.twist = 0;
+      twoHands.folded = false;
+      twoHands.facing[0] = 0;
+      twoHands.facing[1] = 0;
+      twoHands.idA = null;
+      twoHands.idB = null;
       return;
     }
 
-    if (hasTwoHands && frameScore >= this.options.exitThreshold) {
+    if (handA && handB && frameScore >= this.options.exitThreshold) {
       frameState.exitStartedAt = null;
+      frameState.facingA = resultA.facingSign;
+      frameState.facingB = resultB.facingSign;
 
-      const rawOrientation = this.updateFrameGeometry(
-        hands,
-        leftIndex,
-        rightIndex,
-        aspectRatio,
-      );
+      this.copySideEndpoints(handA, handB);
+      const cosAB = this.computeCosAB(aspectRatio);
+      this.updateBaseSwap(cosAB);
+
+      const wantFold = this.computeWantFold();
+      frameState.folded = wantFold;
+      const swapB = wantFold ? !frameState.baseSwap : frameState.baseSwap;
+      const target = swapB ? 1 : 0;
+
+      const dt =
+        frameState.lastTimestamp === null
+          ? 0
+          : Math.max(0, (timestamp - frameState.lastTimestamp) / 1000);
+      frameState.lastTimestamp = timestamp;
+
+      // Frame-rate independent exponential approach to the target blend.
+      const twistSpeed = config.frame.twistSpeed;
+      const alpha = twistSpeed > 0 ? 1 - Math.exp(-twistSpeed * dt) : 1;
+      frameState.twist += (target - frameState.twist) * alpha;
+      if (Math.abs(target - frameState.twist) < 0.001) {
+        frameState.twist = target;
+      }
+      frameState.twist = clamp01(frameState.twist);
+
+      this.updateFrameCorners(frameState.twist);
       frameState.lastDistance = currentDistance;
+
+      const rawOrientation = this.computeRawOrientation(aspectRatio);
 
       twoHands.active = true;
       twoHands.distance = currentDistance;
       twoHands.frameCorners = this.frameCorners;
       twoHands.orientation = this.updateOrientation(rawOrientation, timestamp);
+      twoHands.twist = frameState.twist;
+      twoHands.folded = wantFold;
+      twoHands.facing[0] = frameState.facingA;
+      twoHands.facing[1] = frameState.facingB;
+      twoHands.idA = frameState.idA;
+      twoHands.idB = frameState.idB;
       return;
     }
 
@@ -549,12 +697,26 @@ export class GestureDetector {
       frameState.active = false;
       frameState.exitStartedAt = null;
       frameState.enterStartedAt = null;
+      frameState.idA = null;
+      frameState.idB = null;
+      frameState.facingA = 0;
+      frameState.facingB = 0;
+      frameState.baseSwap = false;
+      frameState.folded = false;
+      frameState.twist = 0;
+      frameState.lastTimestamp = null;
       this.resetOrientation();
 
       twoHands.active = false;
       twoHands.distance = 0;
       twoHands.frameCorners = null;
       twoHands.orientation = null;
+      twoHands.twist = 0;
+      twoHands.folded = false;
+      twoHands.facing[0] = 0;
+      twoHands.facing[1] = 0;
+      twoHands.idA = null;
+      twoHands.idB = null;
       return;
     }
 
@@ -562,6 +724,12 @@ export class GestureDetector {
     twoHands.distance = frameState.lastDistance;
     twoHands.frameCorners = this.frameCorners;
     twoHands.orientation = this.orientationState.stable;
+    twoHands.twist = frameState.twist;
+    twoHands.folded = frameState.folded;
+    twoHands.facing[0] = frameState.facingA;
+    twoHands.facing[1] = frameState.facingB;
+    twoHands.idA = frameState.idA;
+    twoHands.idB = frameState.idB;
   }
 
   detect(
@@ -594,9 +762,14 @@ export class GestureDetector {
       this.analyzeHand(hand, aspectRatio);
       this.smoothScores(state, timestamp);
 
+      this.facingValue = this.computeFacingValue(hand, aspectRatio);
+      const facingSign = this.updateFacing(state, this.facingValue, timestamp);
+
       const output = this.handResults[index];
       output.id = hand.id;
       output.handedness = hand.handedness;
+      output.facingValue = this.facingValue;
+      output.facingSign = facingSign;
       output.openPalm = this.updateHysteresis(
         state.states.openPalm,
         state.smoothedScores.openPalm,

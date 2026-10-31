@@ -82,6 +82,7 @@ export class SceneManager {
       active ? this.screenCorners : null,
       twoHands?.orientation ?? null,
       dt,
+      twoHands?.twist ?? 0,
     );
 
     this.renderer.render(this.scene, this.camera);

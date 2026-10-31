@@ -218,10 +218,11 @@ export class HudOverlay {
         const state = this.getGestureState(hand);
         const score = Number(hand.lShapeScore ?? 0);
         const angle = Number(hand.angleDegrees ?? 0);
+        const facingValue = Number(hand.facingValue ?? 0);
         const fingers = hand.fingerScores ?? [];
 
         ctx.fillText(
-          `${hand.handedness} ${state}  L ${score.toFixed(2)}  ang ${angle.toFixed(0)}deg`,
+          `${hand.handedness} ${state}  L ${score.toFixed(2)}  ang ${angle.toFixed(0)}deg  fv ${facingValue.toFixed(2)}`,
           padding,
           y,
         );
@@ -237,10 +238,23 @@ export class HudOverlay {
 
     const frame = gestureState?.twoHands;
     const frameScore = Number(frame?.score ?? 0);
+    const frameIdA = frame?.idA ?? '-';
+    const frameIdB = frame?.idB ?? '-';
+    const facingA = Number(frame?.facing?.[0] ?? 0);
+    const facingB = Number(frame?.facing?.[1] ?? 0);
+    const folded = Boolean(frame?.folded);
+    const twist = Number(frame?.twist ?? 0);
     const frameText = frame?.active
       ? `${frame.orientation ?? 'frame'} ${frameScore.toFixed(2)}`
       : `idle ${frameScore.toFixed(2)}`;
-    ctx.fillText(`frame: ${frameText}`, padding, y);
+
+    ctx.fillText(
+      `frame: A:${frameIdA} B:${frameIdB} facing ${facingA}/${facingB} fold ${folded ? 'yes' : 'no'} twist ${twist.toFixed(2)}`,
+      padding,
+      y,
+    );
+    y += lineHeight;
+    ctx.fillText(`  ${frameText}`, padding, y);
 
     ctx.restore();
   }

@@ -68,6 +68,16 @@ const config = {
     },
   },
 
+  frame: {
+    // Facing-sign hysteresis keeps edge-on hands from flickering.
+    facingMinMagnitude: 0.15,
+    facingMs: 120,
+    // Exponential approach speed for the folded/twisted corner blend.
+    twistSpeed: 10,
+    // cosAB hysteresis band: swap below -0.1, unswap above +0.1.
+    swapHysteresis: 0.1,
+  },
+
   scene: {
     maxDevicePixelRatio: 2,
     framePanel: {
@@ -76,6 +86,11 @@ const config = {
       themeTransition: 6,
       fillOpacity: 0.5,
       lineOpacity: 0.9,
+      gridU: 16,
+      gridV: 8,
+      // Slightly reduce fill opacity as the panel twists into a fold.
+      twistOpacityThreshold: 0.5,
+      twistOpacityDrop: 0.3,
       textureSize: 128,
       textureDots: 8,
       textureDotRadius: 0.16,

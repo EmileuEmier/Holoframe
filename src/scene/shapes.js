@@ -22,21 +22,43 @@ export class FramePanel {
     this.smoothedCorners = Array.from({ length: CORNER_COUNT }, () => ({ x: 0, y: 0 }));
     this.texture = this.createHalftoneTexture();
 
+    this.gridU = Math.max(1, Math.floor(options.gridU ?? 16));
+    this.gridV = Math.max(1, Math.floor(options.gridV ?? 8));
+    this.vertexCount = (this.gridU + 1) * (this.gridV + 1);
+
+    const uvs = new Float32Array(this.vertexCount * 2);
+    let uvOffset = 0;
+    for (let j = 0; j <= this.gridV; j += 1) {
+      const v = j / this.gridV;
+      for (let i = 0; i <= this.gridU; i += 1) {
+        uvs[uvOffset] = i / this.gridU;
+        uvs[uvOffset + 1] = v;
+        uvOffset += 2;
+      }
+    }
+
+    const indices = [];
+    for (let j = 0; j < this.gridV; j += 1) {
+      for (let i = 0; i < this.gridU; i += 1) {
+        const row = j * (this.gridU + 1);
+        const nextRow = row + this.gridU + 1;
+        const a = row + i;
+        const b = a + 1;
+        const c = nextRow + i;
+        const d = c + 1;
+        indices.push(a, b, c, b, d, c);
+      }
+    }
+
     this.meshGeometry = new THREE.BufferGeometry();
     this.meshGeometry.setAttribute(
       'position',
-      new THREE.BufferAttribute(new Float32Array(CORNER_COUNT * 3), 3).setUsage(
+      new THREE.BufferAttribute(new Float32Array(this.vertexCount * 3), 3).setUsage(
         THREE.DynamicDrawUsage,
       ),
     );
-    this.meshGeometry.setAttribute(
-      'uv',
-      new THREE.BufferAttribute(
-        new Float32Array([0, 0, 0, 1, 1, 1, 1, 0]),
-        2,
-      ),
-    );
-    this.meshGeometry.setIndex([0, 1, 2, 0, 2, 3]);
+    this.meshGeometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    this.meshGeometry.setIndex(indices);
 
     this.fillMaterial = new THREE.MeshBasicMaterial({
       map: this.texture,
@@ -103,7 +125,7 @@ export class FramePanel {
     return texture;
   }
 
-  update(active, corners, orientation, dt) {
+  update(active, corners, orientation, dt, twist = 0) {
     const delta = Math.min(dt, 0.1);
     const fade = 1 - Math.exp(-this.options.fadeSpeed * delta);
     const targetOpacity = active ? 1 : 0;
@@ -139,24 +161,55 @@ export class FramePanel {
     this.currentFillColor.lerp(this.targetFillColor, themeLerp);
     this.currentLineColor.lerp(this.targetLineColor, themeLerp);
 
+    const c0 = this.smoothedCorners[0];
+    const c1 = this.smoothedCorners[1];
+    const c2 = this.smoothedCorners[2];
+    const c3 = this.smoothedCorners[3];
     const meshPositions = this.meshGeometry.attributes.position.array;
     const linePositions = this.lineGeometry.attributes.position.array;
+
+    // Bilinear patch: P(u,v) = (1-u)*lerp(c0,c1,v) + u*lerp(c3,c2,v).
+    // A crossed corner order therefore folds smoothly instead of breaking into
+    // two triangles with a visible diagonal seam.
+    let offset = 0;
+    for (let j = 0; j <= this.gridV; j += 1) {
+      const v = j / this.gridV;
+      const edge0x = c0.x + (c1.x - c0.x) * v;
+      const edge0y = c0.y + (c1.y - c0.y) * v;
+      const edge1x = c3.x + (c2.x - c3.x) * v;
+      const edge1y = c3.y + (c2.y - c3.y) * v;
+
+      for (let i = 0; i <= this.gridU; i += 1) {
+        const u = i / this.gridU;
+        meshPositions[offset] = edge0x + (edge1x - edge0x) * u;
+        meshPositions[offset + 1] = edge0y + (edge1y - edge0y) * u;
+        meshPositions[offset + 2] = 0;
+        offset += 3;
+      }
+    }
+
     for (let i = 0; i < CORNER_COUNT; i += 1) {
       const point = this.smoothedCorners[i];
-      const offset = i * 3;
-      meshPositions[offset] = point.x;
-      meshPositions[offset + 1] = point.y;
-      meshPositions[offset + 2] = 0;
-      linePositions[offset] = point.x;
-      linePositions[offset + 1] = point.y;
-      linePositions[offset + 2] = 0;
+      const lineOffset = i * 3;
+      linePositions[lineOffset] = point.x;
+      linePositions[lineOffset + 1] = point.y;
+      linePositions[lineOffset + 2] = 0;
     }
 
     this.meshGeometry.attributes.position.needsUpdate = true;
     this.lineGeometry.attributes.position.needsUpdate = true;
 
+    const twistAmount = Math.min(1, Math.max(0, Number(twist) || 0));
+    const twistThreshold = this.options.twistOpacityThreshold;
+    const twistDrop =
+      twistAmount > twistThreshold && twistThreshold < 1
+        ? ((twistAmount - twistThreshold) / (1 - twistThreshold)) *
+          this.options.twistOpacityDrop
+        : 0;
+
     this.fillMaterial.color.copy(this.currentFillColor);
-    this.fillMaterial.opacity = this.opacity * this.options.fillOpacity;
+    this.fillMaterial.opacity =
+      this.opacity * this.options.fillOpacity * (1 - twistDrop);
     this.lineMaterial.color.copy(this.currentLineColor);
     this.lineMaterial.opacity = this.opacity * this.options.lineOpacity;
 

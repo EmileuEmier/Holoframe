@@ -1,9 +1,163 @@
 import * as THREE from 'three';
 import config from '../config.js';
 import { getCoverTransform, landmarkToScreen } from '../core/screenMapping.js';
-import { FramePanel, VictoryShard } from './shapes.js';
+import { FramePanel, VictoryShard, FrozenShape } from './shapes.js';
 
 const CORNER_COUNT = 4;
+const PALM_LANDMARKS = [0, 5, 9, 13, 17];
+const PALM_LANDMARK_COUNT = PALM_LANDMARKS.length;
+
+class PalmWipeTracker {
+  constructor(options = config.wipe) {
+    this.options = options;
+    this.capacity = Math.max(2, Math.floor(options.sampleCapacity ?? 64));
+    this.samples = Array.from({ length: this.capacity }, () => ({
+      t: 0,
+      x: 0,
+      y: 0,
+      open: 0,
+    }));
+    this.head = 0;
+    this.count = 0;
+    this.lastSampleAt = 0;
+    this.lastSeen = 0;
+    this.result = {
+      valid: false,
+      distance: 0,
+      distanceRatio: 0,
+      speed: 0,
+      speedRatio: 0,
+      openScore: 0,
+      horizontal: false,
+      direction: '-',
+      dx: 0,
+      dy: 0,
+    };
+    this.debug = {
+      distanceRatio: 0,
+      speed: 0,
+      openScore: 0,
+      direction: '-',
+      cooldownMs: 0,
+    };
+  }
+
+  reset() {
+    this.head = 0;
+    this.count = 0;
+    this.lastSampleAt = 0;
+    this.result.valid = false;
+    this.result.distance = 0;
+    this.result.distanceRatio = 0;
+    this.result.speed = 0;
+    this.result.speedRatio = 0;
+    this.result.openScore = 0;
+    this.result.horizontal = false;
+    this.result.direction = '-';
+    this.result.dx = 0;
+    this.result.dy = 0;
+    this.debug.distanceRatio = 0;
+    this.debug.speed = 0;
+    this.debug.openScore = 0;
+    this.debug.direction = '-';
+  }
+
+  push(t, x, y, open) {
+    if (this.count > 0 && t - this.lastSampleAt > this.options.maxGapMs) {
+      this.reset();
+    }
+    const sample = this.samples[this.head];
+    sample.t = t;
+    sample.x = x;
+    sample.y = y;
+    sample.open = open;
+    this.head = (this.head + 1) % this.capacity;
+    if (this.count < this.capacity) this.count += 1;
+    this.lastSampleAt = t;
+  }
+
+  evaluate(now, aspectRatio) {
+    const result = this.result;
+    result.valid = false;
+
+    if (this.count < 2) {
+      this.debug.distanceRatio = 0;
+      this.debug.speed = 0;
+      this.debug.openScore = 0;
+      this.debug.direction = '-';
+      return result;
+    }
+
+    const oldest = (this.head - this.count + this.capacity) % this.capacity;
+    let firstIndex = -1;
+    for (let n = 0; n < this.count; n += 1) {
+      const index = (oldest + n) % this.capacity;
+      if (now - this.samples[index].t <= this.options.windowMs) {
+        firstIndex = index;
+        break;
+      }
+    }
+    if (firstIndex < 0) {
+      this.debug.distanceRatio = 0;
+      this.debug.speed = 0;
+      this.debug.openScore = 0;
+      this.debug.direction = '-';
+      return result;
+    }
+
+    const lastIndex = (this.head - 1 + this.capacity) % this.capacity;
+    const first = this.samples[firstIndex];
+    const last = this.samples[lastIndex];
+    const dt = (last.t - first.t) / 1000;
+    if (dt <= 0) {
+      this.debug.distanceRatio = 0;
+      this.debug.speed = 0;
+      this.debug.openScore = 0;
+      this.debug.direction = '-';
+      return result;
+    }
+
+    const dx = last.x - first.x;
+    const dy = last.y - first.y;
+    const distance = Math.hypot(dx, dy);
+    const speed = distance / dt;
+
+    let openSum = 0;
+    let openCount = 0;
+    for (let n = 0; n < this.count; n += 1) {
+      const index = (oldest + n) % this.capacity;
+      const sample = this.samples[index];
+      if (now - sample.t <= this.options.windowMs) {
+        openSum += sample.open;
+        openCount += 1;
+      }
+    }
+    const openScore = openCount > 0 ? openSum / openCount : 0;
+
+    // Palm x is aspect-normalized, so distance and speed thresholds use the
+    // same screen-width units as the shared landmark mapping.
+    const minDistance = this.options.minDistance * aspectRatio;
+    const minSpeed = this.options.minSpeed * aspectRatio;
+
+    result.valid = true;
+    result.distance = distance;
+    result.distanceRatio = minDistance > 0 ? distance / minDistance : 0;
+    result.speed = aspectRatio > 0 ? speed / aspectRatio : 0;
+    result.speedRatio = minSpeed > 0 ? speed / minSpeed : 0;
+    result.openScore = openScore;
+    result.horizontal =
+      Math.abs(dy) <= this.options.maxVerticalRatio * Math.abs(dx);
+    result.direction = dx >= 0 ? 'ltr' : 'rtl';
+    result.dx = dx;
+    result.dy = dy;
+
+    this.debug.distanceRatio = result.distanceRatio;
+    this.debug.speed = result.speed;
+    this.debug.openScore = openScore;
+    this.debug.direction = result.direction;
+    return result;
+  }
+}
 
 export class SceneManager {
   constructor(canvas, video, options = config.scene) {
@@ -29,6 +183,14 @@ export class SceneManager {
     this.coverTransform = {};
     this.screenCorners = Array.from({ length: CORNER_COUNT }, () => ({ x: 0, y: 0 }));
     this.lastTime = performance.now();
+
+    this.persistEnabled = false;
+    this.persistDebug = { enabled: false, stamps: 0 };
+    this.stamps = [];
+    this.frameWasActive = false;
+    this.frameActiveSince = null;
+    this.wipeTrackers = new Map();
+    this.wipeCooldownUntil = 0;
 
     this.framePanel = new FramePanel(options.framePanel);
     this.scene.add(this.framePanel.group);
@@ -79,6 +241,10 @@ export class SceneManager {
       config.camera.height,
       this.coverTransform,
     );
+    const aspectRatio =
+      this.video?.videoWidth && this.video?.videoHeight
+        ? this.video.videoWidth / this.video.videoHeight
+        : config.camera.width / config.camera.height;
 
     const twoHands = gestureState?.twoHands;
     const active = Boolean(twoHands?.active && twoHands.frameCorners);
@@ -89,6 +255,8 @@ export class SceneManager {
       }
     }
 
+    // Snapshot before FramePanel.update() starts the live fade.
+    this.updateFrameStampState(active, now);
     this.framePanel.update(
       active,
       active ? this.screenCorners : null,
@@ -98,6 +266,8 @@ export class SceneManager {
     );
 
     this.updateVictoryShards(gestureState, hands, transform, dt, now);
+    this.updateWipe(gestureState, hands, aspectRatio, now);
+    this.updateStamps(now);
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -133,8 +303,10 @@ export class SceneManager {
 
       if (handIndex >= 0) {
         shard.lastSeen = now;
+        const nextActive = this.isVictoryShardActive(gestureHands, handIndex);
+        this.prepareShardUpdate(shard, nextActive, now);
         shard.update(
-          this.isVictoryShardActive(gestureHands, handIndex),
+          nextActive,
           hands[handIndex].landmarks,
           transform,
           dt,
@@ -143,6 +315,7 @@ export class SceneManager {
         if (shard.handId !== null && now - shard.lastSeen > config.victory.idTtlMs) {
           shard.handId = null;
         }
+        this.prepareShardUpdate(shard, false, now);
         shard.update(false, null, transform, dt);
       }
     }
@@ -151,7 +324,8 @@ export class SceneManager {
     // to its persistent id until the hand disappears.
     for (let i = 0; i < hands.length; i += 1) {
       const id = hands[i].id;
-      if (id == null || !this.isVictoryShardActive(gestureHands, i)) continue;
+      const nextActive = this.isVictoryShardActive(gestureHands, i);
+      if (id == null || !nextActive) continue;
 
       let assigned = false;
       for (let s = 0; s < shards.length; s += 1) {
@@ -198,8 +372,9 @@ export class SceneManager {
       // A reused slot must not fly in from the previous hand's pose.
       freeShard.opacity = 0;
       freeShard.initialized = false;
+      freeShard.activeSince = nextActive ? now : null;
       freeShard.update(
-        this.isVictoryShardActive(gestureHands, i),
+        nextActive,
         hands[i].landmarks,
         transform,
         dt,
@@ -220,8 +395,209 @@ export class SceneManager {
     }
   }
 
+  updateFrameStampState(active, now) {
+    if (active && !this.frameWasActive) {
+      this.frameActiveSince = now;
+    } else if (!active && this.frameWasActive) {
+      if (
+        this.persistEnabled &&
+        this.frameActiveSince !== null &&
+        now - this.frameActiveSince >= config.persist.minActiveMs
+      ) {
+        this.addStamp(
+          FrozenShape.fromFramePanel(this.framePanel, config.persist),
+          now,
+        );
+      }
+      this.frameActiveSince = null;
+    }
+    this.frameWasActive = active;
+  }
+
+  prepareShardUpdate(shard, nextActive, now) {
+    if (nextActive) {
+      if (!shard.active || shard.activeSince === null) {
+        shard.activeSince = now;
+      }
+      return;
+    }
+
+    if (shard.active) {
+      if (
+        this.persistEnabled &&
+        shard.activeSince !== null &&
+        now - shard.activeSince >= config.persist.minActiveMs
+      ) {
+        this.addStamp(
+          FrozenShape.fromVictoryShard(shard, config.persist),
+          now,
+        );
+      }
+      shard.activeSince = null;
+    }
+  }
+
+  getPersistDebug() {
+    return this.persistDebug;
+  }
+
+  togglePersist() {
+    this.setPersist(!this.persistEnabled);
+    return this.persistEnabled;
+  }
+
+  setPersist(enabled) {
+    this.persistEnabled = Boolean(enabled);
+    this.persistDebug.enabled = this.persistEnabled;
+    if (!this.persistEnabled && config.persist.clearOnDisable) {
+      this.dismissAllStamps(performance.now(), config.persist.removeFadeMs);
+    }
+  }
+
+  clearStamps() {
+    this.dismissAllStamps(performance.now(), config.wipe.fadeMs);
+  }
+
+  dismissAllStamps(now, fadeMs) {
+    for (const stamp of this.stamps) {
+      stamp.dismiss(now, fadeMs);
+    }
+  }
+
+  addStamp(stamp, now) {
+    this.stamps.push(stamp);
+    this.scene.add(stamp.group);
+
+    const maxStamps = Math.max(0, Math.floor(config.persist.maxStamps));
+    let overflow = this.stamps.length - maxStamps;
+    for (let i = 0; i < this.stamps.length && overflow > 0; i += 1) {
+      const oldest = this.stamps[i];
+      if (oldest.removing) continue;
+      oldest.dismiss(now, config.persist.removeFadeMs);
+      overflow -= 1;
+    }
+  }
+
+  updateStamps(now) {
+    for (let i = this.stamps.length - 1; i >= 0; i -= 1) {
+      const stamp = this.stamps[i];
+      if (!stamp.update(now)) {
+        this.scene.remove(stamp.group);
+        stamp.dispose();
+        this.stamps.splice(i, 1);
+      }
+    }
+    this.persistDebug.stamps = this.stamps.length;
+  }
+
+  getWipeTracker(id) {
+    let tracker = this.wipeTrackers.get(id);
+    if (!tracker) {
+      tracker = new PalmWipeTracker(config.wipe);
+      this.wipeTrackers.set(id, tracker);
+    }
+    return tracker;
+  }
+
+  updateWipe(gestureState, hands, aspectRatio, now) {
+    const gestureHands = gestureState?.hands;
+    const frame = gestureState?.twoHands;
+
+    for (let i = 0; i < hands.length; i += 1) {
+      const hand = hands[i];
+      const id = hand.id;
+      if (id == null || !hand.landmarks) continue;
+
+      const tracker = this.getWipeTracker(id);
+      tracker.lastSeen = now;
+
+      const landmarks = hand.landmarks;
+      let palmX = 0;
+      let palmY = 0;
+      let palmValid = true;
+      for (let k = 0; k < PALM_LANDMARK_COUNT; k += 1) {
+        const landmark = landmarks[PALM_LANDMARKS[k]];
+        if (!landmark) {
+          palmValid = false;
+          break;
+        }
+        palmX += landmark.x;
+        palmY += landmark.y;
+      }
+      if (!palmValid) continue;
+      palmX = (palmX / PALM_LANDMARK_COUNT) * aspectRatio;
+      palmY /= PALM_LANDMARK_COUNT;
+
+      const handState = gestureHands?.[i];
+      const fingers = handState?.fingerScores;
+      let openScore = 0;
+      if (fingers && fingers.length > 0) {
+        for (let k = 0; k < fingers.length; k += 1) {
+          openScore += fingers[k];
+        }
+        openScore /= fingers.length;
+      }
+
+      tracker.push(now, palmX, palmY, openScore);
+      const result = tracker.evaluate(now, aspectRatio);
+      tracker.debug.cooldownMs = Math.max(0, this.wipeCooldownUntil - now);
+      if (handState) handState.wipeDebug = tracker.debug;
+
+      const inFrame = Boolean(
+        frame?.active && (id === frame.idA || id === frame.idB),
+      );
+      const inVictory = Boolean(handState?.victory);
+      if (inFrame || inVictory || !result.valid) continue;
+      if (result.distanceRatio < 1) continue;
+      if (result.speedRatio < 1) continue;
+      if (!result.horizontal) continue;
+      if (result.openScore < config.wipe.minOpenScore) continue;
+      if (
+        config.wipe.directions !== 'both' &&
+        config.wipe.directions !== result.direction
+      ) {
+        continue;
+      }
+      if (now < this.wipeCooldownUntil || this.stamps.length === 0) continue;
+
+      this.fireWipe(result.dx >= 0 ? 1 : -1, now);
+      tracker.reset();
+      tracker.debug.cooldownMs = config.wipe.cooldownMs;
+    }
+
+    const staleAfter = config.wipe.maxGapMs + config.wipe.windowMs;
+    for (const entry of this.wipeTrackers) {
+      if (now - entry[1].lastSeen > staleAfter) {
+        this.wipeTrackers.delete(entry[0]);
+      }
+    }
+  }
+
+  fireWipe(directionSign, now) {
+    this.wipeCooldownUntil = now + config.wipe.cooldownMs;
+    const width = Math.max(1, this.width);
+
+    for (const stamp of this.stamps) {
+      // Delay each stamp by its position along the sweep so the clear reads as
+      // one wave instead of every stamp fading at once.
+      const progress =
+        directionSign >= 0
+          ? stamp.centroidX / width
+          : (width - stamp.centroidX) / width;
+      const delay = Math.min(1, Math.max(0, progress)) * config.wipe.waveMs;
+      stamp.dismiss(now, config.wipe.fadeMs, delay);
+    }
+  }
+
   destroy() {
     window.removeEventListener('resize', this.handleResize);
+    for (const stamp of this.stamps) {
+      this.scene.remove(stamp.group);
+      stamp.dispose();
+    }
+    this.stamps.length = 0;
+    this.persistDebug.stamps = 0;
+    this.wipeTrackers.clear();
     this.framePanel.dispose();
     for (const shard of this.victoryShards) {
       shard.dispose();

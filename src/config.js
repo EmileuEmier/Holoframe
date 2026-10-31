@@ -97,6 +97,32 @@ const config = {
     gradientSize: 64,
   },
 
+  persist: {
+    // C freezes ended gestures as static screen-space stamps.
+    maxStamps: 12,
+    stampOpacity: 0.85,
+    pulse: 0,
+    pulseSpeed: 1.5,
+    clearOnDisable: true,
+    minActiveMs: 300,
+    // Fade used when the oldest stamp is evicted or persist is turned off.
+    removeFadeMs: 250,
+  },
+
+  wipe: {
+    sampleCapacity: 160,   // 64 idi; pencere uzayınca yüksek FPS'te yetsin
+    windowMs: 800,         // 600 idi
+    minDistance: 0.30,     // 0.45 idi
+    maxVerticalRatio: 0.6,
+    minSpeed: 0.45,        // 1.2 idi
+    minOpenScore: 0.6,
+    directions: 'both',
+    maxGapMs: 120,
+    cooldownMs: 800,
+    waveMs: 350,
+    fadeMs: 250,
+  },
+
   scene: {
     maxDevicePixelRatio: 2,
     framePanel: {
@@ -154,6 +180,8 @@ const config = {
 
   controls: {
     toggleHud: 'h',
+    togglePersist: 'c',
+    clearStamps: 'x',
     betaDown: '[',
     betaUp: ']',
     minCutoffDown: ';',

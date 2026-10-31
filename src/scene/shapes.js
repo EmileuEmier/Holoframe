@@ -241,6 +241,7 @@ export class VictoryShard {
     this.opacity = 0;
     this.initialized = false;
     this.active = false;
+    this.activeSince = null;
     this.handId = null;
     this.lastSeen = 0;
 
@@ -439,5 +440,188 @@ export class VictoryShard {
     this.fillMaterial.dispose();
     this.glowMaterial.dispose();
     this.lineMaterial.dispose();
+  }
+}
+
+export class FrozenShape {
+  constructor({
+    group,
+    geometries,
+    materials,
+    fillMaterial,
+    glowMaterial = null,
+    lineMaterial,
+    baseFillOpacity,
+    baseGlowOpacity = 0,
+    baseLineOpacity,
+    centroidX,
+    centroidY,
+    options = config.persist,
+  }) {
+    this.group = group;
+    this.geometries = geometries;
+    this.materials = materials;
+    this.fillMaterial = fillMaterial;
+    this.glowMaterial = glowMaterial;
+    this.lineMaterial = lineMaterial;
+    this.baseFillOpacity = baseFillOpacity;
+    this.baseGlowOpacity = baseGlowOpacity;
+    this.baseLineOpacity = baseLineOpacity;
+    this.centroidX = centroidX;
+    this.centroidY = centroidY;
+    this.options = options;
+
+    this.opacity = 1;
+    this.removing = false;
+    this.fadeStart = 0;
+    this.fadeMs = 1;
+    this.applyOpacity(performance.now());
+  }
+
+  static fromFramePanel(framePanel, options = config.persist) {
+    // Clone the live geometry and materials so the stamp keeps the exact
+    // current look while the live shape fades. Textures stay shared and are
+    // owned by the live shape.
+    const meshGeometry = framePanel.meshGeometry.clone();
+    const lineGeometry = framePanel.lineGeometry.clone();
+    const fillMaterial = framePanel.fillMaterial.clone();
+    const lineMaterial = framePanel.lineMaterial.clone();
+    fillMaterial.opacity = 0;
+    lineMaterial.opacity = 0;
+
+    const mesh = new THREE.Mesh(meshGeometry, fillMaterial);
+    const line = new THREE.LineLoop(lineGeometry, lineMaterial);
+    mesh.frustumCulled = false;
+    line.frustumCulled = false;
+
+    const group = new THREE.Group();
+    group.add(mesh, line);
+
+    const liveOpacity = Math.max(framePanel.opacity, 1e-6);
+    let centroidX = 0;
+    let centroidY = 0;
+    for (let i = 0; i < framePanel.smoothedCorners.length; i += 1) {
+      centroidX += framePanel.smoothedCorners[i].x;
+      centroidY += framePanel.smoothedCorners[i].y;
+    }
+    const cornerCount = framePanel.smoothedCorners.length || 1;
+    centroidX /= cornerCount;
+    centroidY /= cornerCount;
+
+    return new FrozenShape({
+      group,
+      geometries: [meshGeometry, lineGeometry],
+      materials: [fillMaterial, lineMaterial],
+      fillMaterial,
+      lineMaterial,
+      baseFillOpacity: framePanel.fillMaterial.opacity / liveOpacity,
+      baseLineOpacity: framePanel.lineMaterial.opacity / liveOpacity,
+      centroidX,
+      centroidY,
+      options,
+    });
+  }
+
+  static fromVictoryShard(shard, options = config.persist) {
+    const fillGeometry = shard.fillGeometry.clone();
+    const glowGeometry = shard.glowGeometry.clone();
+    const lineGeometry = shard.lineGeometry.clone();
+    const fillMaterial = shard.fillMaterial.clone();
+    const glowMaterial = shard.glowMaterial.clone();
+    const lineMaterial = shard.lineMaterial.clone();
+    fillMaterial.opacity = 0;
+    glowMaterial.opacity = 0;
+    lineMaterial.opacity = 0;
+
+    const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
+    const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+    const line = new THREE.LineLoop(lineGeometry, lineMaterial);
+    fillMesh.frustumCulled = false;
+    glowMesh.frustumCulled = false;
+    line.frustumCulled = false;
+
+    const group = new THREE.Group();
+    group.add(glowMesh, fillMesh, line);
+
+    const liveOpacity = Math.max(shard.opacity, 1e-6);
+    let centroidX = 0;
+    let centroidY = 0;
+    for (let i = 0; i < shard.smoothedPoints.length; i += 1) {
+      centroidX += shard.smoothedPoints[i].x;
+      centroidY += shard.smoothedPoints[i].y;
+    }
+    const pointCount = shard.smoothedPoints.length || 1;
+    centroidX /= pointCount;
+    centroidY /= pointCount;
+
+    return new FrozenShape({
+      group,
+      geometries: [fillGeometry, glowGeometry, lineGeometry],
+      materials: [fillMaterial, glowMaterial, lineMaterial],
+      fillMaterial,
+      glowMaterial,
+      lineMaterial,
+      baseFillOpacity: shard.fillMaterial.opacity / liveOpacity,
+      baseGlowOpacity: shard.glowMaterial.opacity / liveOpacity,
+      baseLineOpacity: shard.lineMaterial.opacity / liveOpacity,
+      centroidX,
+      centroidY,
+      options,
+    });
+  }
+
+  applyOpacity(now) {
+    const pulseAmount = Math.min(1, Math.max(0, this.options.pulse ?? 0));
+    const pulse =
+      pulseAmount > 0
+        ? 1 -
+          pulseAmount *
+            (0.5 +
+              0.5 *
+                Math.sin(now * 0.001 * (this.options.pulseSpeed || 1)))
+        : 1;
+    const stampOpacity = Math.min(
+      1,
+      Math.max(0, this.options.stampOpacity ?? 0.85),
+    );
+    const alpha = this.opacity * stampOpacity * pulse;
+    this.fillMaterial.opacity = this.baseFillOpacity * alpha;
+    if (this.glowMaterial) {
+      this.glowMaterial.opacity = this.baseGlowOpacity * alpha;
+    }
+    this.lineMaterial.opacity = this.baseLineOpacity * alpha;
+    this.group.visible = alpha > 0.001;
+  }
+
+  update(now) {
+    if (this.removing) {
+      if (now < this.fadeStart) {
+        this.opacity = 1;
+      } else {
+        const progress = (now - this.fadeStart) / Math.max(1, this.fadeMs);
+        if (progress >= 1) return false;
+        this.opacity = Math.max(0, 1 - progress);
+      }
+    }
+    this.applyOpacity(now);
+    return true;
+  }
+
+  dismiss(now, fadeMs, delayMs = 0) {
+    const start = now + Math.max(0, delayMs);
+    if (!this.removing || start < this.fadeStart) {
+      this.removing = true;
+      this.fadeStart = start;
+      this.fadeMs = Math.max(1, fadeMs);
+    }
+  }
+
+  dispose() {
+    for (const geometry of this.geometries) {
+      geometry.dispose();
+    }
+    for (const material of this.materials) {
+      material.dispose();
+    }
   }
 }

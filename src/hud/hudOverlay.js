@@ -207,6 +207,16 @@ export class HudOverlay {
     ctx.fillText(debug.tuningHint, padding, y);
     y += lineHeight;
 
+    const persist = debugState.persist;
+    if (persist) {
+      ctx.fillText(
+        `persist: ${persist.enabled ? 'ON' : 'OFF'}  stamps: ${persist.stamps}`,
+        padding,
+        y,
+      );
+      y += lineHeight;
+    }
+
     const gestureState = debugState.gestureState;
     const gestureHands = gestureState?.hands ?? [];
 
@@ -234,6 +244,19 @@ export class HudOverlay {
           .join(' ');
         ctx.fillText(`  ext T I M R P ${extensionText}`, padding, y);
         y += lineHeight;
+
+        const wipe = hand.wipeDebug;
+        if (wipe) {
+          const cooldown = Number(wipe.cooldownMs ?? 0);
+          const cooldownText =
+            cooldown > 0 ? `${(cooldown / 1000).toFixed(1)}s` : 'ready';
+          ctx.fillText(
+            `  wipe d ${Math.min(1, Number(wipe.distanceRatio ?? 0)).toFixed(2)} v ${Number(wipe.speed ?? 0).toFixed(2)} open ${Number(wipe.openScore ?? 0).toFixed(2)} ${wipe.direction ?? '-'} cd ${cooldownText}`,
+            padding,
+            y,
+          );
+          y += lineHeight;
+        }
       }
     }
 

@@ -61,6 +61,7 @@ function handleHands(hands, timestamp) {
 
 function renderFrame() {
   sceneManager.update(latestGestureState, latestHands);
+  debugState.persist = sceneManager.getPersistDebug();
   hud.render(latestHands, video, debugState);
   requestAnimationFrame(renderFrame);
 }
@@ -102,6 +103,18 @@ window.addEventListener('keydown', (event) => {
 
   if (key.toLowerCase() === config.controls.toggleHud) {
     hud.toggle();
+    event.preventDefault();
+    return;
+  }
+
+  if (key.toLowerCase() === config.controls.togglePersist) {
+    sceneManager.togglePersist();
+    event.preventDefault();
+    return;
+  }
+
+  if (key.toLowerCase() === config.controls.clearStamps) {
+    sceneManager.clearStamps();
     event.preventDefault();
     return;
   }

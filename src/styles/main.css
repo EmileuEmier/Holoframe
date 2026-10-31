@@ -1,0 +1,81 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  color: #fff;
+  user-select: none;
+}
+
+.camera-video {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+  /* The selfie mirror transform is applied from config.camera.mirror. */
+}
+
+.scene-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.hud-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.hud-canvas[hidden] {
+  display: none;
+}
+
+.status {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 20;
+  max-width: min(540px, calc(100vw - 48px));
+  padding: 14px 18px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.72);
+  color: rgba(255, 255, 255, 0.92);
+  font: 13px/1.5 "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  letter-spacing: 0.02em;
+  text-align: center;
+  backdrop-filter: blur(6px);
+}
+
+.status.is-error {
+  border-color: rgba(255, 120, 120, 0.8);
+  color: #ffd6d6;
+}
+
+.status[hidden] {
+  display: none;
+}

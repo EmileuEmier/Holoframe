@@ -61,6 +61,12 @@ const config = {
       thumbExtensionRatio: 1.15,
       thumbCurlRatio: 0.95,
     },
+    fist: {
+      // Thumb tip distance from palm center, normalized by wrist-to-middle-MCP.
+      // Folded/tucked thumbs stay below max; extended thumbs fade out by margin.
+      thumbFistMaxDistance: 0.8,
+      thumbFistMargin: 0.25,
+    },
     lShapeAngle: {
       min: 55,
       max: 125,
@@ -123,6 +129,46 @@ const config = {
     fadeMs: 250,
   },
 
+  thermal: {
+    // Initial filter state; a held fist or the T key toggles it.
+    enabled: false,
+    holdMs: 400,
+    cooldownMs: 1000,
+    transitionSpeed: 6,
+    contrast: 1.25,
+    gamma: 1.0,
+    bands: 0,
+    shimmer: 0.03,
+    panelFillOpacity: 0.7,
+    panelLineOpacity: 1.0,
+    palettes: [
+      {
+        name: 'neon',
+        colors: ['#14003d', '#6a00f4', '#ff00c8', '#00e5ff', '#fff700'],
+        panel: {
+          horizontal: { fill: '#39ff14', line: '#ffffff' },
+          vertical: { fill: '#ff7a00', line: '#ffffff' },
+        },
+      },
+      {
+        name: 'ice',
+        colors: ['#02041a', '#0b2a8a', '#2f7bff', '#7ff3ff', '#ffffff'],
+        panel: {
+          horizontal: { fill: '#ff3b30', line: '#ffffff' },
+          vertical: { fill: '#ffb300', line: '#ffffff' },
+        },
+      },
+      {
+        name: 'heat',
+        colors: ['#0a0014', '#7a0070', '#ff2a2a', '#ff9a00', '#fff6b0'],
+        panel: {
+          horizontal: { fill: '#00e5ff', line: '#ffffff' },
+          vertical: { fill: '#39ff14', line: '#ffffff' },
+        },
+      },
+    ],
+  },
+
   scene: {
     maxDevicePixelRatio: 2,
     framePanel: {
@@ -182,6 +228,8 @@ const config = {
     toggleHud: 'h',
     togglePersist: 'c',
     clearStamps: 'x',
+    toggleThermal: 't',
+    cyclePalette: 'p',
     betaDown: '[',
     betaUp: ']',
     minCutoffDown: ';',

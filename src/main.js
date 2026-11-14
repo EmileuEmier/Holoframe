@@ -62,6 +62,7 @@ function handleHands(hands, timestamp) {
 function renderFrame() {
   sceneManager.update(latestGestureState, latestHands);
   debugState.persist = sceneManager.getPersistDebug();
+  debugState.thermal = sceneManager.getThermalDebug();
   hud.render(latestHands, video, debugState);
   requestAnimationFrame(renderFrame);
 }
@@ -115,6 +116,18 @@ window.addEventListener('keydown', (event) => {
 
   if (key.toLowerCase() === config.controls.clearStamps) {
     sceneManager.clearStamps();
+    event.preventDefault();
+    return;
+  }
+
+  if (key.toLowerCase() === config.controls.toggleThermal) {
+    sceneManager.toggleThermal();
+    event.preventDefault();
+    return;
+  }
+
+  if (key.toLowerCase() === config.controls.cyclePalette) {
+    sceneManager.cycleThermalPalette();
     event.preventDefault();
     return;
   }

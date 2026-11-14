@@ -217,6 +217,18 @@ export class HudOverlay {
       y += lineHeight;
     }
 
+    const thermal = debugState.thermal;
+    if (thermal) {
+      const hold = Math.round(Number(thermal.fistHoldMs ?? 0));
+      const holdMax = Math.round(Number(thermal.holdMs ?? config.thermal.holdMs));
+      ctx.fillText(
+        `thermal: ${thermal.enabled ? 'ON' : 'OFF'}  palette ${thermal.palette ?? '-'}  mix ${Number(thermal.mix ?? 0).toFixed(2)}  fistHold ${hold}/${holdMax}`,
+        padding,
+        y,
+      );
+      y += lineHeight;
+    }
+
     const gestureState = debugState.gestureState;
     const gestureHands = gestureState?.hands ?? [];
 
@@ -227,6 +239,8 @@ export class HudOverlay {
       for (const hand of gestureHands) {
         const state = this.getGestureState(hand);
         const score = Number(hand.lShapeScore ?? 0);
+        const fistScore = Number(hand.fistScore ?? 0);
+        const thumbDistance = Number(hand.thumbDistance ?? 0);
         const victoryScore = Number(hand.victoryScore ?? 0);
         const angle = Number(hand.angleDegrees ?? 0);
         const facingValue = Number(hand.facingValue ?? 0);
@@ -242,7 +256,11 @@ export class HudOverlay {
         const extensionText = fingers
           .map((value) => Number(value).toFixed(2))
           .join(' ');
-        ctx.fillText(`  ext T I M R P ${extensionText}`, padding, y);
+        ctx.fillText(
+          `  ext T I M R P ${extensionText}  fist ${fistScore.toFixed(2)} thumbD ${thumbDistance.toFixed(2)}`,
+          padding,
+          y,
+        );
         y += lineHeight;
 
         const wipe = hand.wipeDebug;

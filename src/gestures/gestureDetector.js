@@ -10,6 +10,7 @@ const INDEX_MCP = 5;
 const INDEX_TIP = 8;
 const MIDDLE_MCP = 9;
 const MIDDLE_TIP = 12;
+const RING_MCP = 13;
 const RING_TIP = 16;
 const PINKY_MCP = 17;
 const PINKY_TIP = 20;
@@ -70,6 +71,7 @@ export class GestureDetector {
     };
     this.fingerScores = [0, 0, 0, 0, 0];
     this.angleDegrees = 0;
+    this.thumbDistance = 0;
     this.facingValue = 0;
     this.fallbackPoints = Array.from({ length: LANDMARK_COUNT }, () => ({
       x: 0,
@@ -82,6 +84,8 @@ export class GestureDetector {
       handedness: 'Unknown',
       openPalm: false,
       fist: false,
+      fistScore: 0,
+      thumbDistance: 0,
       victory: false,
       victoryScore: 0,
       lShape: false,
@@ -319,11 +323,52 @@ export class GestureDetector {
     const ringExt = this.fingerScores[3];
     const pinkyExt = this.fingerScores[4];
 
-    const thumbCurl = 1 - thumbExt;
     const indexCurl = 1 - indexExt;
     const middleCurl = 1 - middleExt;
     const ringCurl = 1 - ringExt;
     const pinkyCurl = 1 - pinkyExt;
+
+    const palmCenterX =
+      (points[WRIST].x +
+        points[INDEX_MCP].x +
+        points[MIDDLE_MCP].x +
+        points[RING_MCP].x +
+        points[PINKY_MCP].x) /
+      5;
+    const palmCenterY =
+      (points[WRIST].y +
+        points[INDEX_MCP].y +
+        points[MIDDLE_MCP].y +
+        points[RING_MCP].y +
+        points[PINKY_MCP].y) /
+      5;
+    const palmCenterZ =
+      ((points[WRIST].z ?? 0) +
+        (points[INDEX_MCP].z ?? 0) +
+        (points[MIDDLE_MCP].z ?? 0) +
+        (points[RING_MCP].z ?? 0) +
+        (points[PINKY_MCP].z ?? 0)) /
+      5;
+
+    // A folded thumb can be far from the wrist, so use distance to the palm
+    // center instead of the thumb extension ratio.
+    const thumbDx = points[THUMB_TIP].x - palmCenterX;
+    const thumbDy = points[THUMB_TIP].y - palmCenterY;
+    const thumbDz = (points[THUMB_TIP].z ?? 0) - palmCenterZ;
+    this.thumbDistance = Math.hypot(thumbDx, thumbDy, thumbDz) / handScale;
+
+    const fistOptions = this.options.fist ?? config.gestures.fist;
+    const thumbFistMaxDistance =
+      fistOptions.thumbFistMaxDistance ??
+      config.gestures.fist.thumbFistMaxDistance;
+    const thumbFistMargin = Math.max(
+      fistOptions.thumbFistMargin ?? config.gestures.fist.thumbFistMargin,
+      1e-6,
+    );
+    const thumbNotOut = clamp01(
+      (thumbFistMaxDistance + thumbFistMargin - this.thumbDistance) /
+        thumbFistMargin,
+    );
 
     // A gesture score is limited by its weakest component, so one extended
     // finger or a bad thumb-index angle prevents a false positive.
@@ -335,11 +380,11 @@ export class GestureDetector {
       pinkyExt,
     );
     this.rawScores.fist = Math.min(
-      thumbCurl,
       indexCurl,
       middleCurl,
       ringCurl,
       pinkyCurl,
+      thumbNotOut,
     );
     this.rawScores.victory = Math.min(
       indexExt,
@@ -786,6 +831,8 @@ export class GestureDetector {
         state.smoothedScores.victory,
         timestamp,
       );
+      output.fistScore = state.smoothedScores.fist;
+      output.thumbDistance = this.thumbDistance;
       output.victoryScore = state.smoothedScores.victory;
       output.lShape = this.updateHysteresis(
         state.states.lShape,

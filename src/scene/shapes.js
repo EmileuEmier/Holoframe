@@ -15,10 +15,41 @@ export class FramePanel {
     this.orientation = 'horizontal';
 
     const horizontalTheme = options.themes.horizontal;
+    const verticalTheme = options.themes.vertical ?? horizontalTheme;
     this.currentFillColor = new THREE.Color(horizontalTheme.fill);
     this.currentLineColor = new THREE.Color(horizontalTheme.line);
     this.targetFillColor = new THREE.Color(horizontalTheme.fill);
     this.targetLineColor = new THREE.Color(horizontalTheme.line);
+
+    this.normalThemes = {
+      horizontal: {
+        fill: new THREE.Color(horizontalTheme.fill),
+        line: new THREE.Color(horizontalTheme.line),
+      },
+      vertical: {
+        fill: new THREE.Color(verticalTheme.fill),
+        line: new THREE.Color(verticalTheme.line),
+      },
+    };
+    this.thermalThemes = {
+      horizontal: {
+        fill: new THREE.Color(horizontalTheme.fill),
+        line: new THREE.Color(horizontalTheme.line),
+      },
+      vertical: {
+        fill: new THREE.Color(verticalTheme.fill),
+        line: new THREE.Color(verticalTheme.line),
+      },
+    };
+    this.lastPanelThemes = null;
+    this.thermalMix = 0;
+    this.normalFillOpacity = options.fillOpacity;
+    this.normalLineOpacity = options.lineOpacity;
+    this.thermalFillOpacity = config.thermal.panelFillOpacity ?? 0.7;
+    this.thermalLineOpacity = config.thermal.panelLineOpacity ?? 1.0;
+    this.thermalGhostLineOpacity = this.thermalLineOpacity * 0.5;
+    this.currentFillOpacity = this.normalFillOpacity;
+    this.currentLineOpacity = this.normalLineOpacity;
 
     this.smoothedCorners = Array.from({ length: CORNER_COUNT }, () => ({ x: 0, y: 0 }));
     this.texture = this.createHalftoneTexture();
@@ -91,7 +122,41 @@ export class FramePanel {
     this.line = new THREE.LineLoop(this.lineGeometry, this.lineMaterial);
     this.line.frustumCulled = false;
 
-    this.group.add(this.mesh, this.line);
+    this.lineGeometry2 = new THREE.BufferGeometry();
+    this.lineGeometry2.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(CORNER_COUNT * 3), 3).setUsage(
+        THREE.DynamicDrawUsage,
+      ),
+    );
+
+    this.lineMaterial2 = new THREE.LineBasicMaterial({
+      color: new THREE.Color(horizontalTheme.line),
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+
+    this.line2 = new THREE.LineLoop(this.lineGeometry2, this.lineMaterial2);
+    this.line2.frustumCulled = false;
+    this.line2.visible = false;
+
+    this.group.add(this.mesh, this.line, this.line2);
+  }
+
+  setThermal(mix, panelThemes) {
+    this.thermalMix = Math.min(1, Math.max(0, Number(mix) || 0));
+
+    if (panelThemes === this.lastPanelThemes) return;
+    this.lastPanelThemes = panelThemes;
+
+    const horizontal = panelThemes?.horizontal ?? this.options.themes.horizontal;
+    const vertical =
+      panelThemes?.vertical ?? this.options.themes.vertical ?? horizontal;
+    this.thermalThemes.horizontal.fill.set(horizontal.fill);
+    this.thermalThemes.horizontal.line.set(horizontal.line);
+    this.thermalThemes.vertical.fill.set(vertical.fill);
+    this.thermalThemes.vertical.line.set(vertical.line);
   }
 
   createHalftoneTexture() {
@@ -151,16 +216,34 @@ export class FramePanel {
         }
       }
 
-      const theme =
-        this.options.themes[orientation] ?? this.options.themes.horizontal;
+      const themeOrientation = orientation ?? 'horizontal';
+      const normalTheme =
+        this.normalThemes[themeOrientation] ?? this.normalThemes.horizontal;
+      const thermalTheme =
+        this.thermalThemes[themeOrientation] ?? this.thermalThemes.horizontal;
       this.orientation = orientation ?? this.orientation;
-      this.targetFillColor.set(theme.fill);
-      this.targetLineColor.set(theme.line);
+      this.targetFillColor
+        .copy(normalTheme.fill)
+        .lerp(thermalTheme.fill, this.thermalMix);
+      this.targetLineColor
+        .copy(normalTheme.line)
+        .lerp(thermalTheme.line, this.thermalMix);
     }
 
     const themeLerp = 1 - Math.exp(-this.options.themeTransition * delta);
     this.currentFillColor.lerp(this.targetFillColor, themeLerp);
     this.currentLineColor.lerp(this.targetLineColor, themeLerp);
+
+    const targetFillOpacity =
+      this.normalFillOpacity +
+      (this.thermalFillOpacity - this.normalFillOpacity) * this.thermalMix;
+    const targetLineOpacity =
+      this.normalLineOpacity +
+      (this.thermalLineOpacity - this.normalLineOpacity) * this.thermalMix;
+    this.currentFillOpacity +=
+      (targetFillOpacity - this.currentFillOpacity) * themeLerp;
+    this.currentLineOpacity +=
+      (targetLineOpacity - this.currentLineOpacity) * themeLerp;
 
     const c0 = this.smoothedCorners[0];
     const c1 = this.smoothedCorners[1];
@@ -189,16 +272,21 @@ export class FramePanel {
       }
     }
 
+    const linePositions2 = this.lineGeometry2.attributes.position.array;
     for (let i = 0; i < CORNER_COUNT; i += 1) {
       const point = this.smoothedCorners[i];
       const lineOffset = i * 3;
       linePositions[lineOffset] = point.x;
       linePositions[lineOffset + 1] = point.y;
       linePositions[lineOffset + 2] = 0;
+      linePositions2[lineOffset] = point.x + 1;
+      linePositions2[lineOffset + 1] = point.y + 1;
+      linePositions2[lineOffset + 2] = 0;
     }
 
     this.meshGeometry.attributes.position.needsUpdate = true;
     this.lineGeometry.attributes.position.needsUpdate = true;
+    this.lineGeometry2.attributes.position.needsUpdate = true;
 
     const twistAmount = Math.min(1, Math.max(0, Number(twist) || 0));
     const twistThreshold = this.options.twistOpacityThreshold;
@@ -210,9 +298,16 @@ export class FramePanel {
 
     this.fillMaterial.color.copy(this.currentFillColor);
     this.fillMaterial.opacity =
-      this.opacity * this.options.fillOpacity * (1 - twistDrop);
+      this.opacity * this.currentFillOpacity * (1 - twistDrop);
     this.lineMaterial.color.copy(this.currentLineColor);
-    this.lineMaterial.opacity = this.opacity * this.options.lineOpacity;
+    this.lineMaterial.opacity = this.opacity * this.currentLineOpacity;
+
+    const ghostVisible = this.thermalMix > 0.01 && this.opacity > 0.001;
+    this.line2.visible = ghostVisible;
+    this.lineMaterial2.color.copy(this.currentLineColor);
+    this.lineMaterial2.opacity = ghostVisible
+      ? this.lineMaterial.opacity * this.thermalGhostLineOpacity * this.thermalMix
+      : 0;
 
     this.group.visible = this.opacity > 0.001;
   }
@@ -221,8 +316,10 @@ export class FramePanel {
     this.texture.dispose();
     this.meshGeometry.dispose();
     this.lineGeometry.dispose();
+    this.lineGeometry2.dispose();
     this.fillMaterial.dispose();
     this.lineMaterial.dispose();
+    this.lineMaterial2.dispose();
   }
 }
 
@@ -451,9 +548,11 @@ export class FrozenShape {
     fillMaterial,
     glowMaterial = null,
     lineMaterial,
+    ghostLineMaterial = null,
     baseFillOpacity,
     baseGlowOpacity = 0,
     baseLineOpacity,
+    baseGhostLineOpacity = 0,
     centroidX,
     centroidY,
     options = config.persist,
@@ -464,9 +563,11 @@ export class FrozenShape {
     this.fillMaterial = fillMaterial;
     this.glowMaterial = glowMaterial;
     this.lineMaterial = lineMaterial;
+    this.ghostLineMaterial = ghostLineMaterial;
     this.baseFillOpacity = baseFillOpacity;
     this.baseGlowOpacity = baseGlowOpacity;
     this.baseLineOpacity = baseLineOpacity;
+    this.baseGhostLineOpacity = baseGhostLineOpacity;
     this.centroidX = centroidX;
     this.centroidY = centroidY;
     this.options = options;
@@ -484,18 +585,24 @@ export class FrozenShape {
     // owned by the live shape.
     const meshGeometry = framePanel.meshGeometry.clone();
     const lineGeometry = framePanel.lineGeometry.clone();
+    const lineGeometry2 = framePanel.lineGeometry2.clone();
     const fillMaterial = framePanel.fillMaterial.clone();
     const lineMaterial = framePanel.lineMaterial.clone();
+    const lineMaterial2 = framePanel.lineMaterial2.clone();
     fillMaterial.opacity = 0;
     lineMaterial.opacity = 0;
+    lineMaterial2.opacity = 0;
 
     const mesh = new THREE.Mesh(meshGeometry, fillMaterial);
     const line = new THREE.LineLoop(lineGeometry, lineMaterial);
+    const line2 = new THREE.LineLoop(lineGeometry2, lineMaterial2);
     mesh.frustumCulled = false;
     line.frustumCulled = false;
+    line2.frustumCulled = false;
+    line2.visible = framePanel.line2.visible;
 
     const group = new THREE.Group();
-    group.add(mesh, line);
+    group.add(mesh, line, line2);
 
     const liveOpacity = Math.max(framePanel.opacity, 1e-6);
     let centroidX = 0;
@@ -510,12 +617,14 @@ export class FrozenShape {
 
     return new FrozenShape({
       group,
-      geometries: [meshGeometry, lineGeometry],
-      materials: [fillMaterial, lineMaterial],
+      geometries: [meshGeometry, lineGeometry, lineGeometry2],
+      materials: [fillMaterial, lineMaterial, lineMaterial2],
       fillMaterial,
       lineMaterial,
+      ghostLineMaterial: lineMaterial2,
       baseFillOpacity: framePanel.fillMaterial.opacity / liveOpacity,
       baseLineOpacity: framePanel.lineMaterial.opacity / liveOpacity,
+      baseGhostLineOpacity: framePanel.lineMaterial2.opacity / liveOpacity,
       centroidX,
       centroidY,
       options,
@@ -590,6 +699,9 @@ export class FrozenShape {
       this.glowMaterial.opacity = this.baseGlowOpacity * alpha;
     }
     this.lineMaterial.opacity = this.baseLineOpacity * alpha;
+    if (this.ghostLineMaterial) {
+      this.ghostLineMaterial.opacity = this.baseGhostLineOpacity * alpha;
+    }
     this.group.visible = alpha > 0.001;
   }
 

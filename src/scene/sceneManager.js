@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import config from '../config.js';
 import { getCoverTransform, landmarkToScreen } from '../core/screenMapping.js';
 import { FramePanel, VictoryShard, FrozenShape } from './shapes.js';
+import { VideoLayer } from './videoLayer.js';
 
 const CORNER_COUNT = 4;
 const PALM_LANDMARKS = [0, 5, 9, 13, 17];
@@ -184,6 +185,25 @@ export class SceneManager {
     this.screenCorners = Array.from({ length: CORNER_COUNT }, () => ({ x: 0, y: 0 }));
     this.lastTime = performance.now();
 
+    this.thermalTarget = config.thermal.enabled ? 1 : 0;
+    this.thermalFistHolds = new Map();
+    this.thermalFistLocked = false;
+    this.thermalCooldownUntil = 0;
+    this.thermalHoldMs = 0;
+    this.thermalFrameId = 0;
+    this.anyFistHeld = false;
+    this.thermalDebug = {
+      enabled: this.thermalTarget === 1,
+      palette: '',
+      mix: this.thermalTarget,
+      fistHoldMs: 0,
+      holdMs: config.thermal.holdMs,
+    };
+
+    this.videoLayer = new VideoLayer(video, config.thermal);
+    this.scene.add(this.videoLayer.mesh);
+    this.thermalDebug.palette = this.videoLayer.paletteName;
+
     this.persistEnabled = false;
     this.persistDebug = { enabled: false, stamps: 0 };
     this.stamps = [];
@@ -226,6 +246,16 @@ export class SceneManager {
     this.camera.top = 0;
     this.camera.bottom = this.height;
     this.camera.updateProjectionMatrix();
+
+    const transform = getCoverTransform(
+      this.video,
+      this.width,
+      this.height,
+      config.camera.width,
+      config.camera.height,
+      this.coverTransform,
+    );
+    this.videoLayer.updateCover(transform, this.width, this.height);
   }
 
   update(gestureState, hands = []) {
@@ -246,6 +276,8 @@ export class SceneManager {
         ? this.video.videoWidth / this.video.videoHeight
         : config.camera.width / config.camera.height;
 
+    this.videoLayer.updateCover(transform, this.width, this.height);
+
     const twoHands = gestureState?.twoHands;
     const active = Boolean(twoHands?.active && twoHands.frameCorners);
 
@@ -257,6 +289,10 @@ export class SceneManager {
 
     // Snapshot before FramePanel.update() starts the live fade.
     this.updateFrameStampState(active, now);
+    this.framePanel.setThermal(
+      this.videoLayer.mix,
+      this.videoLayer.palette?.panel,
+    );
     this.framePanel.update(
       active,
       active ? this.screenCorners : null,
@@ -267,6 +303,13 @@ export class SceneManager {
 
     this.updateVictoryShards(gestureState, hands, transform, dt, now);
     this.updateWipe(gestureState, hands, aspectRatio, now);
+    this.updateThermal(gestureState, now);
+    this.videoLayer.update(dt, this.thermalTarget, now);
+    this.thermalDebug.enabled = this.thermalTarget === 1;
+    this.thermalDebug.palette = this.videoLayer.paletteName;
+    this.thermalDebug.mix = this.videoLayer.mix;
+    this.thermalDebug.fistHoldMs = this.thermalHoldMs;
+    this.thermalDebug.holdMs = config.thermal.holdMs;
     this.updateStamps(now);
 
     this.renderer.render(this.scene, this.camera);
@@ -393,6 +436,77 @@ export class SceneManager {
         ? firstActiveShard.smoothedPoints
         : null;
     }
+  }
+
+  updateThermal(gestureState, now) {
+    const gestureHands = gestureState?.hands;
+    const handCount = gestureHands?.length ?? 0;
+    const frame = gestureState?.twoHands;
+    const frameId = (this.thermalFrameId += 1);
+    let anyFist = false;
+    let maxHold = 0;
+
+    for (let i = 0; i < handCount; i += 1) {
+      const hand = gestureHands[i];
+      if (!hand) continue;
+      if (hand.fist) anyFist = true;
+
+      const id = hand.id;
+      if (id == null) continue;
+
+      const inFrame = Boolean(
+        frame?.active && (id === frame.idA || id === frame.idB),
+      );
+      const eligible = Boolean(hand.fist && !inFrame && !hand.victory);
+      if (!eligible) {
+        this.thermalFistHolds.delete(id);
+        continue;
+      }
+
+      let hold = this.thermalFistHolds.get(id);
+      if (!hold) {
+        hold = { start: now, frame: frameId };
+        this.thermalFistHolds.set(id, hold);
+      }
+      hold.frame = frameId;
+
+      const duration = now - hold.start;
+      if (duration > maxHold) maxHold = duration;
+
+      if (
+        !this.thermalFistLocked &&
+        now >= this.thermalCooldownUntil &&
+        duration >= config.thermal.holdMs
+      ) {
+        this.thermalTarget = this.thermalTarget ? 0 : 1;
+        this.thermalFistLocked = true;
+        this.thermalCooldownUntil = now + config.thermal.cooldownMs;
+      }
+    }
+
+    for (const [id, hold] of this.thermalFistHolds) {
+      if (hold.frame !== frameId) this.thermalFistHolds.delete(id);
+    }
+
+    if (!anyFist) this.thermalFistLocked = false;
+    this.anyFistHeld = anyFist;
+    this.thermalHoldMs = Math.min(config.thermal.holdMs, maxHold);
+  }
+
+  getThermalDebug() {
+    return this.thermalDebug;
+  }
+
+  toggleThermal() {
+    this.thermalTarget = this.thermalTarget ? 0 : 1;
+    this.thermalFistHolds.clear();
+    this.thermalHoldMs = 0;
+    if (this.anyFistHeld) this.thermalFistLocked = true;
+    return this.thermalTarget;
+  }
+
+  cycleThermalPalette() {
+    return this.videoLayer.cyclePalette(config.thermal.palettes);
   }
 
   updateFrameStampState(active, now) {
@@ -598,6 +712,9 @@ export class SceneManager {
     this.stamps.length = 0;
     this.persistDebug.stamps = 0;
     this.wipeTrackers.clear();
+    this.thermalFistHolds.clear();
+    this.scene.remove(this.videoLayer.mesh);
+    this.videoLayer.dispose();
     this.framePanel.dispose();
     for (const shard of this.victoryShards) {
       shard.dispose();

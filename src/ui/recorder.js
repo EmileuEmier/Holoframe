@@ -4,8 +4,10 @@ import { getCoverTransform } from '../core/screenMapping.js';
 // Preferred recording containers/codecs, best first. The first one the browser
 // reports as supported wins.
 const MIME_CANDIDATES = [
-  'video/webm;codecs=vp9',
+  'video/mp4;codecs=avc1.42E01E',
+  'video/webm;codecs=h264',
   'video/webm;codecs=vp8',
+  'video/webm;codecs=vp9',
   'video/webm',
   'video/mp4',
 ];

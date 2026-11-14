@@ -230,14 +230,14 @@ const config = {
     // Screen recorder output. Width is capped so the composited canvas stays
     // cheap to draw every frame on phones.
     fps: 30,
-    maxWidth: 1280,
+    maxWidth: 960,
     // Auto-stop after this many seconds and show the result card.
     maxSeconds: 120,
     // The HUD (landmark dots/brackets) is not burned into the recording by
     // default; the thermal layer and shapes are always part of the scene.
     includeHud: false,
     // Target video bitrate at maxWidth; scaled down for narrower output.
-    bitrate: 5000000,
+    bitrate: 3500000,
     // Cancel an in-progress recording if the tab stays hidden this long.
     hiddenCancelMs: 10000,
   },

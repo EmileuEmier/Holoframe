@@ -301,15 +301,11 @@ export class HudOverlay {
 
     const boxDebug = debugState.box;
     if (boxDebug) {
-      const w = Math.round(Number(boxDebug.width ?? 0));
-      const h = Math.round(Number(boxDebug.height ?? 0));
-      const d = Math.round(Number(boxDebug.depth ?? 0));
-      const toDeg = 180 / Math.PI;
-      const roll = Number(boxDebug.roll ?? 0) * toDeg;
-      const yaw = Number(boxDebug.yaw ?? 0) * toDeg;
-      const pitch = Number(boxDebug.pitch ?? 0) * toDeg;
+      const zA = Math.round(Number(boxDebug.zA ?? 0));
+      const zB = Math.round(Number(boxDebug.zB ?? 0));
+      const pop = Number(boxDebug.pop ?? 0);
       ctx.fillText(
-        `box: ${boxDebug.active ? 'ON' : 'OFF'}  ${w} ${h} ${d}  ${roll.toFixed(0)} ${yaw.toFixed(0)} ${pitch.toFixed(0)}  A:${boxDebug.idA ?? '-'} B:${boxDebug.idB ?? '-'}`,
+        `box: ${boxDebug.active ? 'ON' : 'OFF'}  A:${boxDebug.idA ?? '-'} B:${boxDebug.idB ?? '-'}  zA ${zA} zB ${zB}  pop ${pop.toFixed(2)}`,
         padding,
         y,
       );

@@ -2,12 +2,14 @@ import * as THREE from 'three';
 import config from '../config.js';
 import { getCoverTransform, landmarkToScreen } from '../core/screenMapping.js';
 import { FramePanel, VictoryShard, FrozenShape } from './shapes.js';
-import { BoxSlab } from './box.js';
+import { FingerPrism } from './box.js';
 import { VideoLayer } from './videoLayer.js';
 
 const CORNER_COUNT = 4;
 const PALM_LANDMARKS = [0, 5, 9, 13, 17];
 const PALM_LANDMARK_COUNT = PALM_LANDMARKS.length;
+const FINGERTIPS = [4, 8, 12, 16, 20];
+const FINGERTIP_COUNT = FINGERTIPS.length;
 
 class PalmWipeTracker {
   constructor(options = config.wipe) {
@@ -187,26 +189,29 @@ export class SceneManager {
     this.boxCamera.position.set(0, 0, 1000);
     this.boxCamera.lookAt(0, 0, 0);
 
-    this.boxSlab = new BoxSlab(config.box);
-    this.sceneBox.add(this.boxSlab.group);
+    this.boxPrism = new FingerPrism(config.box);
+    this.sceneBox.add(this.boxPrism.group);
 
-    this.boxHands = {
-      a: { x: 0, y: 0, size: 0, valid: false },
-      b: { x: 0, y: 0, size: 0, valid: false },
-    };
-    this.boxPalmCenter = { x: 0, y: 0 };
+    const createBoxHand = () => ({
+      valid: false,
+      size: 0,
+      handZ: 0,
+      points: Array.from({ length: FINGERTIP_COUNT }, () => ({
+        x: 0,
+        y: 0,
+        z: 0,
+      })),
+    });
+    this.boxHands = { a: createBoxHand(), b: createBoxHand() };
     this.boxWrist = { x: 0, y: 0 };
     this.boxMcp = { x: 0, y: 0 };
     this.boxDebug = {
       active: false,
-      width: 0,
-      height: 0,
-      depth: 0,
-      roll: 0,
-      yaw: 0,
-      pitch: 0,
       idA: null,
       idB: null,
+      zA: 0,
+      zB: 0,
+      pop: 0,
     };
 
     this.width = 0;
@@ -487,17 +492,20 @@ export class SceneManager {
 
   updateBox(gestureState, hands, transform, dt, now) {
     const box = gestureState?.box;
+    const options = config.box;
     const active = Boolean(box?.active);
     const data = this.boxHands;
     data.a.valid = false;
     data.b.valid = false;
 
+    // Screen width of the video after the object-fit: cover scaling.
+    const coverWidthPx =
+      (transform?.videoWidth ?? 0) * (transform?.scale ?? 0);
+
     if (active) {
       for (let i = 0; i < hands.length; i += 1) {
         const hand = hands[i];
         const id = hand.id;
-        if (id == null || !hand.landmarks) continue;
-
         let target = null;
         if (id === box.idA) {
           target = data.a;
@@ -506,52 +514,92 @@ export class SceneManager {
         } else {
           continue;
         }
+        if (!hand.landmarks) continue;
 
         const landmarks = hand.landmarks;
-        let palmX = 0;
-        let palmY = 0;
+        const wrist = landmarks[0];
+        const middleMcp = landmarks[9];
+        if (!wrist || !middleMcp) continue;
+
+        landmarkToScreen(wrist, transform, this.boxWrist);
+        landmarkToScreen(middleMcp, transform, this.boxMcp);
+        const handSize = Math.hypot(
+          this.boxMcp.x - this.boxWrist.x,
+          this.boxMcp.y - this.boxWrist.y,
+        );
+
         let valid = true;
-        for (let k = 0; k < PALM_LANDMARK_COUNT; k += 1) {
-          const landmark = landmarks[PALM_LANDMARKS[k]];
+        for (let k = 0; k < FINGERTIP_COUNT; k += 1) {
+          const landmark = landmarks[FINGERTIPS[k]];
           if (!landmark) {
             valid = false;
             break;
           }
-          palmX += landmark.x;
-          palmY += landmark.y;
+          const point = target.points[k];
+          // Same landmark -> screen mapping as the HUD.
+          landmarkToScreen(landmark, transform, point);
+          point.z = -((landmark.z ?? 0) * coverWidthPx * options.zScale);
         }
         if (!valid) continue;
 
-        // Same landmark -> screen mapping as the HUD.
-        this.boxPalmCenter.x = palmX / PALM_LANDMARK_COUNT;
-        this.boxPalmCenter.y = palmY / PALM_LANDMARK_COUNT;
-        landmarkToScreen(this.boxPalmCenter, transform, target);
-
-        const wrist = landmarks[0];
-        const middleMcp = landmarks[9];
-        if (!wrist || !middleMcp) continue;
-        landmarkToScreen(wrist, transform, this.boxWrist);
-        landmarkToScreen(middleMcp, transform, this.boxMcp);
-        target.size = Math.hypot(
-          this.boxMcp.x - this.boxWrist.x,
-          this.boxMcp.y - this.boxWrist.y,
-        );
+        target.size = handSize;
         target.valid = true;
       }
     }
 
-    this.boxSlab.update(active, data, this.width, this.height, dt, now);
+    let sizeSum = 0;
+    let sizeCount = 0;
+    if (data.a.valid) {
+      sizeSum += data.a.size;
+      sizeCount += 1;
+    }
+    if (data.b.valid) {
+      sizeSum += data.b.size;
+      sizeCount += 1;
+    }
+    const meanHandSize = sizeCount > 0 ? sizeSum / sizeCount : 0;
+
+    if (active) {
+      for (let h = 0; h < 2; h += 1) {
+        const target = h === 0 ? data.a : data.b;
+        if (!target.valid) continue;
+
+        // Larger/closer hand sits toward the camera.
+        target.handZ =
+          meanHandSize > 1e-6
+            ? (target.size / meanHandSize - 1) * options.handDepthGain
+            : 0;
+
+        for (let k = 0; k < FINGERTIP_COUNT; k += 1) {
+          const point = target.points[k];
+          point.z = Math.min(
+            options.maxDepthPx,
+            Math.max(
+              -options.maxDepthPx,
+              point.z + target.handZ,
+            ),
+          );
+        }
+      }
+    }
+
+    this.boxPrism.update(
+      active,
+      data,
+      this.width,
+      this.height,
+      this.boxCamera.position.z,
+      dt,
+      now,
+    );
 
     const debug = this.boxDebug;
     debug.active = active;
-    debug.width = this.boxSlab.width;
-    debug.height = this.boxSlab.height;
-    debug.depth = this.boxSlab.depth;
-    debug.roll = this.boxSlab.roll;
-    debug.yaw = this.boxSlab.yaw;
-    debug.pitch = this.boxSlab.pitch;
     debug.idA = box?.idA ?? null;
     debug.idB = box?.idB ?? null;
+    debug.zA = data.a.handZ;
+    debug.zB = data.b.handZ;
+    debug.pop = this.boxPrism.pop;
   }
 
   getBoxDebug() {
@@ -843,8 +891,8 @@ export class SceneManager {
     for (const shard of this.victoryShards) {
       shard.dispose();
     }
-    this.sceneBox.remove(this.boxSlab.group);
-    this.boxSlab.dispose();
+    this.sceneBox.remove(this.boxPrism.group);
+    this.boxPrism.dispose();
     this.renderer.dispose();
   }
 }

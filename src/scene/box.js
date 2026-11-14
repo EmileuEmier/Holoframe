@@ -1,62 +1,193 @@
 import * as THREE from 'three';
 import config from '../config.js';
 
-const MIN_SIZE = 1e-3;
+const FINGER_COUNT = 5;
+const VERTEX_COUNT = 12;
+const HAND_VERTEX_COUNT = FINGER_COUNT * 2;
+const HAND_POSITION_LENGTH = HAND_VERTEX_COUNT * 3;
+
+// Placeholder look; the final materials land in the next task.
+const SIDE_COLOR = '#9b6bff';
+const SIDE_OPACITY = 0.35;
+const CLOSING_COLOR = '#ff9a3d';
+const CLOSING_OPACITY = 0.45;
+const CAP_COLOR = '#3ad6ff';
+const CAP_OPACITY = 0.25;
+const EDGE_COLOR = '#ffffff';
+const EDGE_OPACITY = 0.9;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function buildMeshIndices() {
+  const indices = [];
+
+  // Sides 0..3: (Ai, A(i+1), B(i+1), Bi), two triangles each.
+  for (let i = 0; i < 4; i += 1) {
+    const a = i;
+    const aNext = i + 1;
+    const b = FINGER_COUNT + i;
+    const bNext = FINGER_COUNT + i + 1;
+    indices.push(a, aNext, bNext, a, bNext, b);
+  }
+  const sidesCount = indices.length;
+
+  // Closing side i = 4 (pinky -> thumb): (A4, A0, B0, B4).
+  indices.push(4, 0, FINGER_COUNT, 4, FINGER_COUNT, FINGER_COUNT + 4);
+  const closingCount = indices.length - sidesCount;
+
+  // Cap A fan from centroid index 10.
+  for (let i = 0; i < FINGER_COUNT; i += 1) {
+    indices.push(10, i, (i + 1) % FINGER_COUNT);
+  }
+  const capACount = indices.length - sidesCount - closingCount;
+
+  // Cap B fan from centroid index 11.
+  for (let i = 0; i < FINGER_COUNT; i += 1) {
+    const start = FINGER_COUNT + i;
+    const next = FINGER_COUNT + ((i + 1) % FINGER_COUNT);
+    indices.push(11, start, next);
+  }
+
+  return {
+    indices,
+    sidesStart: 0,
+    sidesCount,
+    closingStart: sidesCount,
+    closingCount,
+    capAStart: sidesCount + closingCount,
+    capACount,
+    capBStart: sidesCount + closingCount + capACount,
+    capBCount: indices.length - sidesCount - closingCount - capACount,
+  };
+}
+
+function buildLineIndices() {
+  const indices = [];
+
+  // Two pentagon rings.
+  for (let i = 0; i < FINGER_COUNT; i += 1) {
+    indices.push(i, (i + 1) % FINGER_COUNT);
+  }
+  for (let i = 0; i < FINGER_COUNT; i += 1) {
+    indices.push(
+      FINGER_COUNT + i,
+      FINGER_COUNT + ((i + 1) % FINGER_COUNT),
+    );
+  }
+
+  // Five connecting edges.
+  for (let i = 0; i < FINGER_COUNT; i += 1) {
+    indices.push(i, FINGER_COUNT + i);
+  }
+
+  return indices;
+}
+
 /**
- * Big 3D slab posed between two open palms. Lives in the perspective scene and
- * uses CSS pixel sized dimensions, so 1 world unit === 1 CSS pixel on z = 0.
+ * Pentagonal prism whose ten corners are the ten fingertips of two open hands.
+ * Positions are written in world units already (CSS pixels on z = 0), so the
+ * group has no transform.
  */
-export class BoxSlab {
+export class FingerPrism {
   constructor(options = config.box) {
     this.options = options;
 
     this.group = new THREE.Group();
     this.group.visible = false;
 
-    // Outer group carries the roll; the inner group carries yaw/pitch in the
-    // box's local frame plus the pixel size and pop-in scale.
-    this.tiltGroup = new THREE.Group();
-    this.group.add(this.tiltGroup);
+    // Smoothed world positions: [A0..A4, B0..B4] each xyz.
+    this.target = new Float32Array(HAND_POSITION_LENGTH);
+    this.current = new Float32Array(HAND_POSITION_LENGTH);
 
-    this.geometry = new THREE.BoxGeometry(1, 1, 1);
-    this.material = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(options.baseColor),
-      transparent: true,
-      opacity: 0,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    this.mesh = new THREE.Mesh(this.geometry, this.material);
+    // 10 fingertips + 2 cap centroids.
+    this.positions = new Float32Array(VERTEX_COUNT * 3);
+    this.uvs = new Float32Array(VERTEX_COUNT * 2);
+    this.linePositions = new Float32Array(HAND_POSITION_LENGTH);
+
+    const meshLayout = buildMeshIndices();
+    this.geometry = new THREE.BufferGeometry();
+    this.positionAttribute = new THREE.BufferAttribute(
+      this.positions,
+      3,
+    ).setUsage(THREE.DynamicDrawUsage);
+    this.uvAttribute = new THREE.BufferAttribute(this.uvs, 2).setUsage(
+      THREE.DynamicDrawUsage,
+    );
+    this.geometry.setAttribute('position', this.positionAttribute);
+    this.geometry.setAttribute('uv', this.uvAttribute);
+    this.geometry.setIndex(meshLayout.indices);
+    this.geometry.addGroup(
+      meshLayout.sidesStart,
+      meshLayout.sidesCount,
+      0,
+    );
+    this.geometry.addGroup(
+      meshLayout.closingStart,
+      meshLayout.closingCount,
+      1,
+    );
+    this.geometry.addGroup(meshLayout.capAStart, meshLayout.capACount, 2);
+    this.geometry.addGroup(meshLayout.capBStart, meshLayout.capBCount, 3);
+
+    this.materials = [
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(SIDE_COLOR),
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(CLOSING_COLOR),
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(CAP_COLOR),
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(CAP_COLOR),
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    ];
+
+    this.mesh = new THREE.Mesh(this.geometry, this.materials);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 1;
 
-    this.edgeGeometry = new THREE.EdgesGeometry(this.geometry);
+    this.lineGeometry = new THREE.BufferGeometry();
+    this.lineAttribute = new THREE.BufferAttribute(
+      this.linePositions,
+      3,
+    ).setUsage(THREE.DynamicDrawUsage);
+    this.lineGeometry.setAttribute('position', this.lineAttribute);
+    this.lineGeometry.setIndex(buildLineIndices());
     this.lineMaterial = new THREE.LineBasicMaterial({
-      color: new THREE.Color(options.lineColor),
+      color: new THREE.Color(EDGE_COLOR),
       transparent: true,
       opacity: 0,
       depthWrite: false,
     });
-    this.edges = new THREE.LineSegments(this.edgeGeometry, this.lineMaterial);
+    this.edges = new THREE.LineSegments(
+      this.lineGeometry,
+      this.lineMaterial,
+    );
     this.edges.frustumCulled = false;
     this.edges.renderOrder = 2;
 
-    this.tiltGroup.add(this.mesh, this.edges);
+    this.group.add(this.mesh, this.edges);
 
-    // Smoothed pose in screen pixels / radians.
-    this.centerX = 0;
-    this.centerY = 0;
-    this.width = 0;
-    this.height = 0;
-    this.depth = 0;
-    this.roll = 0;
-    this.yaw = 0;
-    this.pitch = (options.basePitchDeg * Math.PI) / 180;
     this.initialized = false;
     this.wasActive = false;
 
@@ -68,83 +199,174 @@ export class BoxSlab {
     this.popAnimating = false;
   }
 
-  update(active, hands, viewWidth, viewHeight, dt, now) {
+  writeHandTarget(hand, offset, viewWidth, viewHeight, cameraDistance) {
+    const points = hand.points;
+    const target = this.target;
+    const invDistance = 1 / Math.max(cameraDistance, 1e-6);
+
+    for (let i = 0; i < FINGER_COUNT; i += 1) {
+      const point = points[i];
+      // Inverse perspective: scale the offset from the screen center by
+      // (D - z) / D so the vertex still projects onto its exact pixel.
+      const projection = (cameraDistance - point.z) * invDistance;
+      const index = (offset + i) * 3;
+      target[index] = (point.x - viewWidth * 0.5) * projection;
+      target[index + 1] = (viewHeight * 0.5 - point.y) * projection;
+      target[index + 2] = point.z;
+    }
+  }
+
+  writeCapUvs(hand, offset) {
+    // Positions are shared by side and cap triangles, so each vertex can carry
+    // only one UV. The cap bounding-box mapping is used for the placeholder
+    // pass; the final materials can split vertices later if they need side UVs.
+    const points = hand.points;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (let i = 0; i < FINGER_COUNT; i += 1) {
+      const point = points[i];
+      if (point.x < minX) minX = point.x;
+      if (point.x > maxX) maxX = point.x;
+      if (point.y < minY) minY = point.y;
+      if (point.y > maxY) maxY = point.y;
+    }
+
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    const invX = spanX > 1e-6 ? 1 / spanX : 0;
+    const invY = spanY > 1e-6 ? 1 / spanY : 0;
+
+    for (let i = 0; i < FINGER_COUNT; i += 1) {
+      const point = points[i];
+      const uv = (offset + i) * 2;
+      this.uvs[uv] = invX > 0 ? (point.x - minX) * invX : 0.5;
+      this.uvs[uv + 1] = invY > 0 ? (point.y - minY) * invY : 0.5;
+    }
+  }
+
+  writeCapCentroidUvs() {
+    // Cap A centroid (index 10) and cap B centroid (index 11).
+    this.uvs[20] = 0.5;
+    this.uvs[21] = 0.5;
+    this.uvs[22] = 0.5;
+    this.uvs[23] = 0.5;
+  }
+
+  writeGeometry() {
+    const current = this.current;
+    const positions = this.positions;
+    const lines = this.linePositions;
+    const t = this.pop;
+
+    let centroidAx = 0;
+    let centroidAy = 0;
+    let centroidAz = 0;
+    let centroidBx = 0;
+    let centroidBy = 0;
+    let centroidBz = 0;
+
+    for (let i = 0; i < FINGER_COUNT; i += 1) {
+      const aIndex = i * 3;
+      const bIndex = (FINGER_COUNT + i) * 3;
+
+      const ax = current[aIndex];
+      const ay = current[aIndex + 1];
+      const az = current[aIndex + 2];
+      const bx = current[bIndex];
+      const by = current[bIndex + 1];
+      const bz = current[bIndex + 2];
+
+      // B extrudes out of A during the pop animation.
+      const poppedBx = ax + (bx - ax) * t;
+      const poppedBy = ay + (by - ay) * t;
+      const poppedBz = az + (bz - az) * t;
+
+      positions[aIndex] = ax;
+      positions[aIndex + 1] = ay;
+      positions[aIndex + 2] = az;
+      positions[bIndex] = poppedBx;
+      positions[bIndex + 1] = poppedBy;
+      positions[bIndex + 2] = poppedBz;
+
+      lines[aIndex] = ax;
+      lines[aIndex + 1] = ay;
+      lines[aIndex + 2] = az;
+      lines[bIndex] = poppedBx;
+      lines[bIndex + 1] = poppedBy;
+      lines[bIndex + 2] = poppedBz;
+
+      centroidAx += ax;
+      centroidAy += ay;
+      centroidAz += az;
+      centroidBx += poppedBx;
+      centroidBy += poppedBy;
+      centroidBz += poppedBz;
+    }
+
+    const centroidAIndex = HAND_VERTEX_COUNT * 3;
+    const centroidBIndex = centroidAIndex + 3;
+    const inverseCount = 1 / FINGER_COUNT;
+    positions[centroidAIndex] = centroidAx * inverseCount;
+    positions[centroidAIndex + 1] = centroidAy * inverseCount;
+    positions[centroidAIndex + 2] = centroidAz * inverseCount;
+    positions[centroidBIndex] = centroidBx * inverseCount;
+    positions[centroidBIndex + 1] = centroidBy * inverseCount;
+    positions[centroidBIndex + 2] = centroidBz * inverseCount;
+
+    this.positionAttribute.needsUpdate = true;
+    this.lineAttribute.needsUpdate = true;
+
+    this.materials[0].opacity = SIDE_OPACITY * t;
+    this.materials[1].opacity = CLOSING_OPACITY * t;
+    this.materials[2].opacity = CAP_OPACITY * t;
+    this.materials[3].opacity = CAP_OPACITY * t;
+    this.lineMaterial.opacity = EDGE_OPACITY * t;
+  }
+
+  update(active, hands, viewWidth, viewHeight, cameraDistance, dt, now) {
     const options = this.options;
     const hasPose = Boolean(active && hands?.a?.valid && hands?.b?.valid);
     const delta = Math.min(dt, 0.1);
 
     if (active && !this.wasActive) {
-      // Snap to the current hands on activation instead of flying in from the
-      // previous box pose.
       this.initialized = false;
     }
 
     if (hasPose) {
-      const a = hands.a;
-      const b = hands.b;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const span = Math.hypot(dx, dy);
-
-      const targetWidth = Math.max(1, span * options.widthScale);
-      const targetHeight = clamp(
-        targetWidth * options.heightRatio,
-        options.minHeightPx,
-        options.maxHeightPx,
+      this.writeHandTarget(
+        hands.a,
+        0,
+        viewWidth,
+        viewHeight,
+        cameraDistance,
       );
-      const targetDepth = clamp(
-        targetWidth * options.depthRatio,
-        options.minDepthPx,
-        options.maxDepthPx,
+      this.writeHandTarget(
+        hands.b,
+        FINGER_COUNT,
+        viewWidth,
+        viewHeight,
+        cameraDistance,
       );
-      const targetCenterX = (a.x + b.x) * 0.5;
-      const targetCenterY = (a.y + b.y) * 0.5;
-      // Screen y points down, world y points up, so the A->B screen angle is
-      // negated to become a world roll.
-      const targetRoll = Math.atan2(-dy, dx);
-
-      let targetYaw = 0;
-      if (a.size > MIN_SIZE) {
-        targetYaw = clamp(
-          (b.size / a.size - 1) * options.yawGain,
-          -options.maxYaw,
-          options.maxYaw,
-        );
-      }
-      const targetPitch = (options.basePitchDeg * Math.PI) / 180;
+      this.writeCapUvs(hands.a, 0);
+      this.writeCapUvs(hands.b, FINGER_COUNT);
+      this.writeCapCentroidUvs();
 
       if (!this.initialized) {
-        this.centerX = targetCenterX;
-        this.centerY = targetCenterY;
-        this.width = targetWidth;
-        this.height = targetHeight;
-        this.depth = targetDepth;
-        this.roll = targetRoll;
-        this.yaw = targetYaw;
-        this.pitch = targetPitch;
+        this.current.set(this.target);
         this.initialized = true;
+      } else if (options.motionSmoothing > 0) {
+        const motion = 1 - Math.exp(-options.motionSmoothing * delta);
+        for (let i = 0; i < this.current.length; i += 1) {
+          this.current[i] += (this.target[i] - this.current[i]) * motion;
+        }
       } else {
-        const motion =
-          options.motionSmoothing > 0
-            ? 1 - Math.exp(-options.motionSmoothing * delta)
-            : 1;
-        this.centerX += (targetCenterX - this.centerX) * motion;
-        this.centerY += (targetCenterY - this.centerY) * motion;
-        this.width += (targetWidth - this.width) * motion;
-        this.height += (targetHeight - this.height) * motion;
-        this.depth += (targetDepth - this.depth) * motion;
-
-        // Shortest-path smoothing across the +-PI wrap.
-        const rollDelta = Math.atan2(
-          Math.sin(targetRoll - this.roll),
-          Math.cos(targetRoll - this.roll),
-        );
-        this.roll += rollDelta * motion;
-        this.roll = Math.atan2(Math.sin(this.roll), Math.cos(this.roll));
-
-        this.yaw += (targetYaw - this.yaw) * motion;
-        this.pitch += (targetPitch - this.pitch) * motion;
+        this.current.set(this.target);
       }
+
+      this.uvAttribute.needsUpdate = true;
     }
 
     this.wasActive = Boolean(active);
@@ -177,32 +399,15 @@ export class BoxSlab {
     }
 
     this.group.visible = true;
-
-    // Screen pixel (px, py) -> world (px - W/2, H/2 - py, 0).
-    this.group.position.set(
-      this.centerX - viewWidth * 0.5,
-      viewHeight * 0.5 - this.centerY,
-      0,
-    );
-    this.group.rotation.z = this.roll;
-
-    this.tiltGroup.rotation.x = this.pitch;
-    this.tiltGroup.rotation.y = this.yaw;
-    // The x scale carries the pop-in so the slab grows out of its own center.
-    this.tiltGroup.scale.set(
-      Math.max(MIN_SIZE, this.width * this.pop),
-      Math.max(MIN_SIZE, this.height),
-      Math.max(MIN_SIZE, this.depth),
-    );
-
-    this.material.opacity = options.baseOpacity * this.pop;
-    this.lineMaterial.opacity = options.lineOpacity * this.pop;
+    this.writeGeometry();
   }
 
   dispose() {
     this.geometry.dispose();
-    this.material.dispose();
-    this.edgeGeometry.dispose();
+    for (const material of this.materials) {
+      material.dispose();
+    }
+    this.lineGeometry.dispose();
     this.lineMaterial.dispose();
   }
 }

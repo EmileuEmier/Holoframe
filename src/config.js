@@ -96,22 +96,14 @@ const config = {
     // Distance hysteresis when leaving: exit below this fraction of the enter
     // distance.
     exitDistanceRatio: 0.8,
-    widthScale: 1.0,
-    heightRatio: 0.35,
-    minHeightPx: 60,
-    maxHeightPx: 400,
-    depthRatio: 0.5,
-    minDepthPx: 40,
-    maxDepthPx: 600,
-    yawGain: 1.5,
-    maxYaw: 0.9,
-    basePitchDeg: 18,
-    motionSmoothing: 20,
+    // Fingertip depth: landmark z scaled by the cover width, plus a per-hand
+    // offset so the closer/larger hand sits toward the camera.
+    zScale: 1.0,
+    handDepthGain: 400,
+    maxDepthPx: 400,
+    // 0 disables extra smoothing; the landmarks are already One Euro smoothed.
+    motionSmoothing: 0,
     popMs: 220,
-    baseColor: '#9b6bff',
-    baseOpacity: 0.35,
-    lineColor: '#ffffff',
-    lineOpacity: 0.9,
   },
 
   victory: {

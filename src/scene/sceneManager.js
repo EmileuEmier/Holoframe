@@ -212,6 +212,7 @@ export class SceneManager {
       zA: 0,
       zB: 0,
       pop: 0,
+      uvMode: this.boxPrism.getUvMode(),
     };
 
     this.width = 0;
@@ -238,6 +239,8 @@ export class SceneManager {
     this.videoLayer = new VideoLayer(video, config.thermal);
     this.scene.add(this.videoLayer.mesh);
     this.thermalDebug.palette = this.videoLayer.paletteName;
+    // The prism faces share the video texture, palette, and thermal uniforms.
+    this.boxPrism.setVideoUniforms(this.videoLayer.material.uniforms);
 
     this.persistEnabled = false;
     this.persistDebug = { enabled: false, stamps: 0 };
@@ -302,6 +305,11 @@ export class SceneManager {
       this.coverTransform,
     );
     this.videoLayer.updateCover(transform, this.width, this.height);
+    this.boxPrism.setCover(
+      transform,
+      this.height,
+      this.renderer.getPixelRatio(),
+    );
   }
 
   update(gestureState, hands = []) {
@@ -323,6 +331,11 @@ export class SceneManager {
         : config.camera.width / config.camera.height;
 
     this.videoLayer.updateCover(transform, this.width, this.height);
+    this.boxPrism.setCover(
+      transform,
+      this.height,
+      this.renderer.getPixelRatio(),
+    );
 
     const twoHands = gestureState?.twoHands;
     const active = Boolean(twoHands?.active && twoHands.frameCorners);
@@ -600,10 +613,17 @@ export class SceneManager {
     debug.zA = data.a.handZ;
     debug.zB = data.b.handZ;
     debug.pop = this.boxPrism.pop;
+    debug.uvMode = this.boxPrism.getUvMode();
   }
 
   getBoxDebug() {
     return this.boxDebug;
+  }
+
+  cycleBoxUv() {
+    const mode = this.boxPrism.cycleUvMode();
+    this.boxDebug.uvMode = mode;
+    return mode;
   }
 
   updateThermal(gestureState, now) {

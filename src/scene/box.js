@@ -1,18 +1,14 @@
 import * as THREE from 'three';
 import config from '../config.js';
+import boxVertexShader from '../shaders/boxFace.vert.glsl?raw';
+import boxFragmentShader from '../shaders/boxFace.frag.glsl?raw';
 
 const FINGER_COUNT = 5;
 const VERTEX_COUNT = 12;
 const HAND_VERTEX_COUNT = FINGER_COUNT * 2;
 const HAND_POSITION_LENGTH = HAND_VERTEX_COUNT * 3;
+const MAX_PALETTE_STOPS = 5;
 
-// Placeholder look; the final materials land in the next task.
-const SIDE_COLOR = '#9b6bff';
-const SIDE_OPACITY = 0.35;
-const CLOSING_COLOR = '#ff9a3d';
-const CLOSING_OPACITY = 0.45;
-const CAP_COLOR = '#3ad6ff';
-const CAP_OPACITY = 0.25;
 const EDGE_COLOR = '#ffffff';
 const EDGE_OPACITY = 0.9;
 
@@ -85,6 +81,43 @@ function buildLineIndices() {
   return indices;
 }
 
+function createHatchTexture(options = config.box.hatch) {
+  const stripeWidth = Math.max(1, options?.stripeWidthPx ?? 10);
+  const angle = THREE.MathUtils.degToRad(options?.angleDeg ?? 45);
+  const period = stripeWidth * 2;
+
+  // A tile covering several rotated periods repeats cleanly in both axes.
+  const size = Math.max(2, Math.round(period * Math.SQRT2 * 4));
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = '#ffffff';
+  ctx.translate(size * 0.5, size * 0.5);
+  ctx.rotate(angle);
+
+  const span = size * 1.5;
+  for (let offset = -span; offset <= span; offset += period) {
+    ctx.fillRect(offset, -span, stripeWidth, span * 2);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createPalettePlaceholder() {
+  return Array.from({ length: MAX_PALETTE_STOPS }, () => new THREE.Vector3());
+}
+
 /**
  * Pentagonal prism whose ten corners are the ten fingertips of two open hands.
  * Positions are written in world units already (CSS pixels on z = 0), so the
@@ -131,35 +164,82 @@ export class FingerPrism {
     this.geometry.addGroup(meshLayout.capAStart, meshLayout.capACount, 2);
     this.geometry.addGroup(meshLayout.capBStart, meshLayout.capBCount, 3);
 
+    // Uniforms shared by every prism material. The video-derived ones are
+    // replaced with the VideoLayer's own uniform objects so both draw with the
+    // same texture, palette, and thermal settings.
+    this.opacityUniform = { value: 0 };
+    this.uvMode = options.uvMode === 'screen' ? 'screen' : 'face';
+    this.uvModeUniform = { value: this.uvMode === 'screen' ? 1 : 0 };
+    this.mirrorUniform = { value: config.camera.mirror ? 1 : 0 };
+    this.coverOriginUniform = { value: new THREE.Vector2() };
+    this.coverSizeUniform = { value: new THREE.Vector2(1, 1) };
+    this.viewportHeightUniform = { value: 1 };
+    this.pixelRatioUniform = { value: 1 };
+
+    const videoDefaults = {
+      uMap: { value: null },
+      uPalette: { value: createPalettePlaceholder() },
+      uPaletteSize: { value: 1 },
+      uContrast: { value: config.thermal.contrast },
+      uGamma: { value: config.thermal.gamma },
+      uBands: { value: config.thermal.bands },
+      uShimmer: { value: config.thermal.shimmer },
+      uTime: { value: 0 },
+    };
+
+    const makeFaceUniforms = (shade, faceOpacity) => ({
+      ...videoDefaults,
+      uMirror: this.mirrorUniform,
+      uOpacity: this.opacityUniform,
+      uFaceOpacity: { value: faceOpacity },
+      uShade: { value: shade },
+      uUvMode: this.uvModeUniform,
+      uCoverOrigin: this.coverOriginUniform,
+      uCoverSize: this.coverSizeUniform,
+      uViewportHeight: this.viewportHeightUniform,
+      uPixelRatio: this.pixelRatioUniform,
+    });
+
+    this.sideUniforms = makeFaceUniforms(
+      options.faceShade?.sides ?? 0.9,
+      options.faceOpacity ?? 0.7,
+    );
+    this.capUniforms = makeFaceUniforms(
+      options.faceShade?.caps ?? 1.0,
+      (options.faceOpacity ?? 0.7) * (options.capOpacityScale ?? 0.6),
+    );
+
+    const makeFaceMaterial = (uniforms) =>
+      new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: boxVertexShader,
+        fragmentShader: boxFragmentShader,
+        transparent: true,
+        depthTest: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      });
+
+    this.sideMaterial = makeFaceMaterial(this.sideUniforms);
+    this.capMaterial = makeFaceMaterial(this.capUniforms);
+
+    this.hatchTexture = createHatchTexture(options.hatch);
+    this.hatchMaterial = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(EDGE_COLOR),
+      map: this.hatchTexture,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+
+    // Groups: 0 sides, 1 closing hatch, 2 cap A, 3 cap B.
     this.materials = [
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(SIDE_COLOR),
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(CLOSING_COLOR),
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(CAP_COLOR),
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(CAP_COLOR),
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
+      this.sideMaterial,
+      this.hatchMaterial,
+      this.capMaterial,
+      this.capMaterial,
     ];
 
     this.mesh = new THREE.Mesh(this.geometry, this.materials);
@@ -186,8 +266,48 @@ export class FingerPrism {
     this.edges.frustumCulled = false;
     this.edges.renderOrder = 2;
 
-    this.group.add(this.mesh, this.edges);
+    this.glowMaterial = new THREE.LineBasicMaterial({
+      color: new THREE.Color(EDGE_COLOR),
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.glowEdges = new THREE.LineSegments(
+      this.lineGeometry,
+      this.glowMaterial,
+    );
+    this.glowEdges.frustumCulled = false;
+    this.glowEdges.renderOrder = 3;
 
+    // Reuse the mesh's position buffer; only the ten tips are points.
+    this.pointsGeometry = new THREE.BufferGeometry();
+    this.pointsGeometry.setAttribute('position', this.positionAttribute);
+    this.pointsGeometry.setDrawRange(0, HAND_VERTEX_COUNT);
+    this.pointsMaterial = new THREE.PointsMaterial({
+      color: new THREE.Color(EDGE_COLOR),
+      size: options.vertexSizePx ?? 6,
+      sizeAttenuation: false,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.points = new THREE.Points(
+      this.pointsGeometry,
+      this.pointsMaterial,
+    );
+    this.points.frustumCulled = false;
+    this.points.renderOrder = 4;
+
+    this.group.add(
+      this.mesh,
+      this.edges,
+      this.glowEdges,
+      this.points,
+    );
+
+    this.videoUniforms = null;
     this.initialized = false;
     this.wasActive = false;
 
@@ -197,6 +317,64 @@ export class FingerPrism {
     this.popTarget = 0;
     this.popStart = 0;
     this.popAnimating = false;
+  }
+
+  setVideoUniforms(uniforms) {
+    if (!uniforms) return;
+    this.videoUniforms = uniforms;
+
+    // Share the live objects by reference so palette swaps and per-frame time
+    // updates reach the prism without copying values.
+    const keys = [
+      'uMap',
+      'uPalette',
+      'uPaletteSize',
+      'uContrast',
+      'uGamma',
+      'uBands',
+      'uShimmer',
+      'uTime',
+    ];
+    for (const key of keys) {
+      if (!uniforms[key]) continue;
+      this.sideUniforms[key] = uniforms[key];
+      this.capUniforms[key] = uniforms[key];
+    }
+
+    if (uniforms.uMirror) {
+      this.mirrorUniform = uniforms.uMirror;
+      this.sideUniforms.uMirror = uniforms.uMirror;
+      this.capUniforms.uMirror = uniforms.uMirror;
+    }
+  }
+
+  setCover(transform, viewportHeight, pixelRatio) {
+    if (transform) {
+      const coverWidth =
+        (transform.videoWidth ?? 0) * (transform.scale ?? 0);
+      const coverHeight =
+        (transform.videoHeight ?? 0) * (transform.scale ?? 0);
+      this.coverOriginUniform.value.set(
+        transform.offsetX ?? 0,
+        transform.offsetY ?? 0,
+      );
+      this.coverSizeUniform.value.set(
+        Math.max(coverWidth, 1e-6),
+        Math.max(coverHeight, 1e-6),
+      );
+    }
+    this.viewportHeightUniform.value = viewportHeight;
+    this.pixelRatioUniform.value = pixelRatio;
+  }
+
+  cycleUvMode() {
+    this.uvMode = this.uvMode === 'screen' ? 'face' : 'screen';
+    this.uvModeUniform.value = this.uvMode === 'screen' ? 1 : 0;
+    return this.uvMode;
+  }
+
+  getUvMode() {
+    return this.uvMode;
   }
 
   writeHandTarget(hand, offset, viewWidth, viewHeight, cameraDistance) {
@@ -218,8 +396,8 @@ export class FingerPrism {
 
   writeCapUvs(hand, offset) {
     // Positions are shared by side and cap triangles, so each vertex can carry
-    // only one UV. The cap bounding-box mapping is used for the placeholder
-    // pass; the final materials can split vertices later if they need side UVs.
+    // only one UV. The cap bounding-box mapping is used for all faces; screen
+    // UV mode bypasses it in the fragment shader.
     const points = hand.points;
     let minX = Infinity;
     let maxX = -Infinity;
@@ -319,11 +497,12 @@ export class FingerPrism {
     this.positionAttribute.needsUpdate = true;
     this.lineAttribute.needsUpdate = true;
 
-    this.materials[0].opacity = SIDE_OPACITY * t;
-    this.materials[1].opacity = CLOSING_OPACITY * t;
-    this.materials[2].opacity = CAP_OPACITY * t;
-    this.materials[3].opacity = CAP_OPACITY * t;
+    // Every prism layer follows the pop animation.
+    this.opacityUniform.value = t;
+    this.hatchMaterial.opacity = (this.options.hatchOpacity ?? 0.9) * t;
     this.lineMaterial.opacity = EDGE_OPACITY * t;
+    this.glowMaterial.opacity = (this.options.glowOpacity ?? 0.35) * t;
+    this.pointsMaterial.opacity = t;
   }
 
   update(active, hands, viewWidth, viewHeight, cameraDistance, dt, now) {
@@ -404,10 +583,14 @@ export class FingerPrism {
 
   dispose() {
     this.geometry.dispose();
-    for (const material of this.materials) {
+    for (const material of new Set(this.materials)) {
       material.dispose();
     }
     this.lineGeometry.dispose();
     this.lineMaterial.dispose();
+    this.glowMaterial.dispose();
+    this.pointsGeometry.dispose();
+    this.pointsMaterial.dispose();
+    this.hatchTexture?.dispose();
   }
 }

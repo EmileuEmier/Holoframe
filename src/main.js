@@ -133,6 +133,12 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  if (key.toLowerCase() === config.controls.cycleBoxUv) {
+    sceneManager.cycleBoxUv();
+    event.preventDefault();
+    return;
+  }
+
   if (key === config.controls.betaDown) {
     smoother.adjustBeta(-config.smoothing.tuning.betaStep);
     syncSmoothingDebug();

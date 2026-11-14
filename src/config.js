@@ -104,6 +104,15 @@ const config = {
     // 0 disables extra smoothing; the landmarks are already One Euro smoothed.
     motionSmoothing: 0,
     popMs: 220,
+    // Final prism look.
+    faceOpacity: 0.7,
+    capOpacityScale: 0.6,
+    faceShade: { sides: 0.9, caps: 1.0 },
+    uvMode: 'face',
+    hatch: { stripeWidthPx: 10, angleDeg: 45 },
+    hatchOpacity: 0.9,
+    glowOpacity: 0.35,
+    vertexSizePx: 6,
   },
 
   victory: {
@@ -252,6 +261,7 @@ const config = {
     clearStamps: 'x',
     toggleThermal: 't',
     cyclePalette: 'p',
+    cycleBoxUv: 'b',
     betaDown: '[',
     betaUp: ']',
     minCutoffDown: ';',

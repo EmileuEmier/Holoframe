@@ -305,7 +305,7 @@ export class HudOverlay {
       const zB = Math.round(Number(boxDebug.zB ?? 0));
       const pop = Number(boxDebug.pop ?? 0);
       ctx.fillText(
-        `box: ${boxDebug.active ? 'ON' : 'OFF'}  A:${boxDebug.idA ?? '-'} B:${boxDebug.idB ?? '-'}  zA ${zA} zB ${zB}  pop ${pop.toFixed(2)}`,
+        `box: ${boxDebug.active ? 'ON' : 'OFF'}  A:${boxDebug.idA ?? '-'} B:${boxDebug.idB ?? '-'}  zA ${zA} zB ${zB}  pop ${pop.toFixed(2)}  uv ${boxDebug.uvMode ?? 'face'}`,
         padding,
         y,
       );

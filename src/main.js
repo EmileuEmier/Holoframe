@@ -1,11 +1,12 @@
 import './styles/main.css';
 import config from './config.js';
-import { startCamera, showStatus } from './core/camera.js';
+import { startCamera, showStatus, describeCameraError } from './core/camera.js';
 import { HandTracker } from './core/handTracker.js';
 import { LandmarkSmoother } from './core/smoothing.js';
 import { GestureDetector } from './gestures/gestureDetector.js';
 import { HudOverlay } from './hud/hudOverlay.js';
 import { SceneManager } from './scene/sceneManager.js';
+import { UiController } from './ui/uiController.js';
 
 const video = document.querySelector('#camera');
 const sceneCanvas = document.querySelector('#scene');
@@ -18,6 +19,12 @@ const handTracker = new HandTracker();
 const gestureDetector = new GestureDetector(config.gestures);
 const sceneManager = new SceneManager(sceneCanvas, video, config.scene);
 
+const ui = new UiController({
+  hud,
+  sceneManager,
+  onStart: () => start(),
+});
+
 const initialSmoothing = smoother.getParameters();
 const debugState = {
   gestureState: null,
@@ -29,6 +36,8 @@ const debugState = {
 let latestHands = [];
 let latestGestureState = null;
 let lastDetectionTimestamp = null;
+let starting = false;
+let started = false;
 
 function syncSmoothingDebug() {
   const parameters = smoother.getParameters();
@@ -65,39 +74,79 @@ function renderFrame() {
   debugState.thermal = sceneManager.getThermalDebug();
   debugState.box = sceneManager.getBoxDebug();
   hud.render(latestHands, video, debugState);
+  ui.sync();
   requestAnimationFrame(renderFrame);
 }
 
-async function boot() {
+async function start() {
+  if (starting || started) return;
+  starting = true;
+
+  ui.setLoading(config.ui.strings.loadingCamera);
+
+  // Fullscreen must be requested inside the user gesture (the Start click),
+  // before any await, or the browser rejects it.
+  if (ui.shouldStartFullscreen()) {
+    await ui.requestFullscreen();
+  }
+
   try {
     await startCamera(video, statusElement);
-  } catch {
-    // camera.js already displayed a clear permission/device message.
+  } catch (error) {
+    starting = false;
+    // camera.js already produced a clear, localized message.
+    ui.showError(describeCameraError(error));
     return;
   }
 
+  ui.setLoading(config.ui.strings.loadingModel);
+
   try {
-    showStatus(statusElement, 'Loading hand tracking model...');
     await handTracker.init();
-    showStatus(statusElement, '');
-
-    handTracker.start(video, handleHands, (error) => {
-      lastDetectionTimestamp = null;
-      debugState.detectionRate = 0;
-      latestHands = [];
-      latestGestureState = null;
-      debugState.gestureState = null;
-      showStatus(statusElement, `Hand tracking stopped: ${error.message}`, true);
-    });
-
-    requestAnimationFrame(renderFrame);
   } catch (error) {
+    starting = false;
+    ui.showError(
+      config.ui.strings.modelFailed.replace('{message}', error.message),
+    );
+    return;
+  }
+
+  handTracker.start(video, handleHands, (error) => {
+    lastDetectionTimestamp = null;
+    debugState.detectionRate = 0;
+    latestHands = [];
+    latestGestureState = null;
+    debugState.gestureState = null;
     showStatus(
       statusElement,
-      `Could not load hand tracking: ${error.message}. Make sure public/models/hand_landmarker.task exists.`,
+      config.ui.strings.trackingStopped.replace('{message}', error.message),
       true,
     );
-  }
+  });
+
+  starting = false;
+  started = true;
+  ui.finishStart();
+  requestAnimationFrame(renderFrame);
+}
+
+// The renderer, orthographic camera, box perspective camera and video cover all
+// depend on the viewport size, so re-run their resize handlers whenever the
+// viewport can change without a plain window resize.
+function handleViewportChange() {
+  hud.handleResize();
+  sceneManager.handleResize();
+}
+
+window.addEventListener('orientationchange', () => {
+  handleViewportChange();
+  // Some mobile browsers report stale dimensions right after the event.
+  window.setTimeout(handleViewportChange, 250);
+});
+window.addEventListener('fullscreenchange', handleViewportChange);
+window.addEventListener('webkitfullscreenchange', handleViewportChange);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', handleViewportChange);
 }
 
 window.addEventListener('keydown', (event) => {
@@ -139,6 +188,12 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  if (key.toLowerCase() === config.controls.toggleDebug) {
+    hud.toggleDebugText();
+    event.preventDefault();
+    return;
+  }
+
   if (key === config.controls.betaDown) {
     smoother.adjustBeta(-config.smoothing.tuning.betaStep);
     syncSmoothingDebug();
@@ -166,5 +221,3 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
   }
 });
-
-boot();

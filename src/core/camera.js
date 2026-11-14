@@ -15,28 +15,29 @@ export function showStatus(element, message, isError = false) {
   element.classList.toggle('is-error', isError);
 }
 
-function describeCameraError(error) {
+export function describeCameraError(error) {
+  const strings = config.ui.strings.camera;
   switch (error?.name) {
     case 'NotAllowedError':
     case 'SecurityError':
-      return 'Camera permission denied. Allow camera access in your browser, then reload Holoframe.';
+      return strings.denied;
     case 'NotFoundError':
     case 'DevicesNotFoundError':
-      return 'No camera found. Connect a webcam, then reload Holoframe.';
+      return strings.notFound;
     case 'NotReadableError':
     case 'TrackStartError':
-      return 'The camera is already in use by another app. Close it, then reload Holoframe.';
+      return strings.inUse;
     case 'OverconstrainedError':
     case 'ConstraintNotSatisfiedError':
-      return 'The camera does not support the requested video settings. Try a different camera.';
+      return strings.overconstrained;
     default:
-      return `Could not start the camera: ${error?.message ?? 'unknown error'}`;
+      return strings.unknown.replace('{message}', error?.message ?? '?');
   }
 }
 
 export async function startCamera(video, statusElement) {
   if (!navigator.mediaDevices?.getUserMedia) {
-    const message = 'This browser does not support webcam access. Try a recent version of Chrome, Edge, or Firefox over HTTPS or localhost.';
+    const message = config.ui.strings.camera.unsupported;
     showStatus(statusElement, message, true);
     throw new Error(message);
   }
@@ -49,7 +50,7 @@ export async function startCamera(video, statusElement) {
   video.style.transform = config.camera.mirror ? 'scaleX(-1)' : 'none';
 
   try {
-    showStatus(statusElement, 'Requesting camera access...');
+    showStatus(statusElement, config.ui.strings.camera.requesting);
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: false,

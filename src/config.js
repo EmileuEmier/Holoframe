@@ -255,6 +255,72 @@ const config = {
     },
   },
 
+  ui: {
+    // Toolbar auto-hide delay after the last pointer/touch activity.
+    autoHideMs: 5000,
+    // How long a toggle toast stays on screen.
+    toastMs: 1600,
+    // Landing checkbox default; only used when the Fullscreen API exists.
+    startFullscreenDefault: true,
+    // All user-facing text lives here so the UI stays in one language.
+    strings: {
+      title: 'Holoframe',
+      tagline: 'Ellerinle yönettiğin gerçek zamanlı holografik çerçeve.',
+      start: 'Başlat',
+      startFullscreen: 'Tam ekranda başlat',
+      retry: 'Tekrar dene',
+      privacy: 'Görüntü cihazından çıkmaz; el takibi tarayıcıda çalışır.',
+      fullscreenHint: 'Tam ekran için Paylaş > Ana Ekrana Ekle',
+      loadingCamera: 'Kamera açılıyor...',
+      loadingModel: 'Model yükleniyor...',
+      gestures: [
+        { title: 'İki el L çerçevesi', description: 'Panel' },
+        { title: 'V işareti', description: 'Üçgenler' },
+        { title: 'Yumruk tut', description: 'Termal filtre' },
+        { title: 'İki açık el', description: 'Prizma' },
+        { title: 'Açık el süpürme', description: 'Şekilleri temizle' },
+      ],
+      toolbar: {
+        thermal: 'Termal',
+        palette: 'Palet',
+        persist: 'Kalıcı',
+        clear: 'Temizle',
+        landmarks: 'El noktaları',
+        debug: 'Debug',
+        fullscreen: 'Tam ekran',
+      },
+      toast: {
+        thermalOn: 'Termal: açık',
+        thermalOff: 'Termal: kapalı',
+        palette: 'Palet: {name}',
+        persistOn: 'Kalıcı mod: açık',
+        persistOff: 'Kalıcı mod: kapalı',
+        clear: 'Şekiller temizlendi',
+        landmarksOn: 'El noktaları: açık',
+        landmarksOff: 'El noktaları: kapalı',
+        debugOn: 'Debug: açık',
+        debugOff: 'Debug: kapalı',
+      },
+      // Reused by camera.js so the error text has a single source.
+      camera: {
+        requesting: 'Kamera erişimi isteniyor...',
+        unsupported:
+          'Bu tarayıcı kameraya erişimi desteklemiyor. Güncel bir Chrome, Edge veya Firefox kullanın (HTTPS veya localhost).',
+        denied:
+          'Kamera izni reddedildi. Tarayıcıda kamera erişimine izin verip tekrar deneyin.',
+        notFound:
+          'Kamera bulunamadı. Bir web kamerası bağlayıp tekrar deneyin.',
+        inUse:
+          'Kamera başka bir uygulama tarafından kullanılıyor. Onu kapatıp tekrar deneyin.',
+        overconstrained:
+          'Kamera istenen video ayarlarını desteklemiyor. Başka bir kamera deneyin.',
+        unknown: 'Kamera başlatılamadı: {message}',
+      },
+      modelFailed: 'El takibi modeli yüklenemedi: {message}',
+      trackingStopped: 'El takibi durdu: {message}',
+    },
+  },
+
   controls: {
     toggleHud: 'h',
     togglePersist: 'c',
@@ -262,6 +328,7 @@ const config = {
     toggleThermal: 't',
     cyclePalette: 'p',
     cycleBoxUv: 'b',
+    toggleDebug: 'd',
     betaDown: '[',
     betaUp: ']',
     minCutoffDown: ';',

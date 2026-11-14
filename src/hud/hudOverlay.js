@@ -10,6 +10,8 @@ export class HudOverlay {
     this.ctx = canvas.getContext('2d');
     this.options = options;
     this.enabled = options.enabled;
+    // Runtime switch for the debug TEXT block only; landmarks/brackets stay on.
+    this.debugTextEnabled = options.debug.enabled;
     this.width = 0;
     this.height = 0;
     this.dpr = 1;
@@ -50,6 +52,16 @@ export class HudOverlay {
   toggle() {
     this.setEnabled(!this.enabled);
     return this.enabled;
+  }
+
+  setDebugTextEnabled(enabled) {
+    this.debugTextEnabled = Boolean(enabled);
+    this.options.debug.enabled = this.debugTextEnabled;
+    return this.debugTextEnabled;
+  }
+
+  toggleDebugText() {
+    return this.setDebugTextEnabled(!this.debugTextEnabled);
   }
 
   updateFps(now) {
@@ -183,7 +195,7 @@ export class HudOverlay {
 
   drawDebug(ctx, debugState) {
     const debug = this.options.debug;
-    if (!debug.enabled || !debugState) return;
+    if (!this.debugTextEnabled || !debugState) return;
 
     const padding = this.options.fps.padding;
     const lineHeight = debug.lineHeight;

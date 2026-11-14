@@ -961,6 +961,55 @@ export class GestureDetector {
     box.idB = state.idB;
   }
 
+  reset() {
+    this.handStates.clear();
+    this.identityMatcher.reset();
+
+    this.orientationState.stable = null;
+    this.orientationState.candidate = null;
+    this.orientationState.candidateSince = 0;
+
+    const frameState = this.frameState;
+    frameState.active = false;
+    frameState.enterStartedAt = null;
+    frameState.exitStartedAt = null;
+    frameState.lastDistance = 0;
+    frameState.idA = null;
+    frameState.idB = null;
+    frameState.facingA = 0;
+    frameState.facingB = 0;
+    frameState.baseSwap = false;
+    frameState.folded = false;
+    frameState.twist = 0;
+    frameState.lastTimestamp = null;
+
+    const boxState = this.boxState;
+    boxState.active = false;
+    boxState.enterStartedAt = null;
+    boxState.exitStartedAt = null;
+    boxState.idA = null;
+    boxState.idB = null;
+
+    const result = this.result;
+    result.hands.length = 0;
+    result.box.active = false;
+    result.box.idA = null;
+    result.box.idB = null;
+
+    const twoHands = result.twoHands;
+    twoHands.active = false;
+    twoHands.distance = 0;
+    twoHands.frameCorners = null;
+    twoHands.orientation = null;
+    twoHands.score = 0;
+    twoHands.twist = 0;
+    twoHands.folded = false;
+    twoHands.facing[0] = 0;
+    twoHands.facing[1] = 0;
+    twoHands.idA = null;
+    twoHands.idB = null;
+  }
+
   detect(
     hands,
     aspectRatio = config.camera.width / config.camera.height,

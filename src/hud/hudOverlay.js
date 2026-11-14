@@ -54,6 +54,11 @@ export class HudOverlay {
     return this.enabled;
   }
 
+  clear() {
+    this.fps = 0;
+    this.ctx.clearRect(0, 0, this.width, this.height);
+  }
+
   setDebugTextEnabled(enabled) {
     this.debugTextEnabled = Boolean(enabled);
     this.options.debug.enabled = this.debugTextEnabled;

@@ -895,6 +895,45 @@ export class SceneManager {
     }
   }
 
+  // Returns the manager to a clean state for a new session without disposing
+  // the renderer or its textures/geometries (they are reused across sessions).
+  reset() {
+    for (const stamp of this.stamps) {
+      this.scene.remove(stamp.group);
+      stamp.dispose();
+    }
+    this.stamps.length = 0;
+    this.persistEnabled = false;
+    this.persistDebug.enabled = false;
+    this.persistDebug.stamps = 0;
+
+    this.frameWasActive = false;
+    this.frameActiveSince = null;
+
+    this.wipeTrackers.clear();
+    this.wipeCooldownUntil = 0;
+
+    this.thermalTarget = 0;
+    this.thermalFistHolds.clear();
+    this.thermalFistLocked = false;
+    this.thermalCooldownUntil = 0;
+    this.thermalHoldMs = 0;
+    this.anyFistHeld = false;
+    this.thermalDebug.enabled = false;
+    this.thermalDebug.fistHoldMs = 0;
+    this.thermalDebug.mix = 0;
+    this.videoLayer.reset();
+
+    this.framePanel.reset();
+    for (const shard of this.victoryShards) shard.reset();
+    this.boxPrism.reset();
+
+    this.lastTime = performance.now();
+
+    // Clear the last rendered frame from the Three.js canvas.
+    this.renderer.clear();
+  }
+
   destroy() {
     window.removeEventListener('resize', this.handleResize);
     for (const stamp of this.stamps) {

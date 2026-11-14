@@ -39,4 +39,7 @@ export const icons = {
   fullscreen: svg(
     '<path d="M4 9V5.4A1.4 1.4 0 0 1 5.4 4H9"/><path d="M15 4h3.6A1.4 1.4 0 0 1 20 5.4V9"/><path d="M20 15v3.6a1.4 1.4 0 0 1-1.4 1.4H15"/><path d="M9 20H5.4A1.4 1.4 0 0 1 4 18.6V15"/>',
   ),
+
+  // Stop square: end the session and return to the landing page.
+  stop: svg('<rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/>'),
 };

@@ -26,7 +26,14 @@ export class HandTracker {
     });
   }
 
+  isInitialized() {
+    return Boolean(this.landmarker);
+  }
+
   async init() {
+    // Keep the landmarker alive across sessions so a restart skips loading.
+    if (this.landmarker) return;
+
     const vision = await FilesetResolver.forVisionTasks(this.options.wasmBaseUrl);
 
     const createLandmarker = (delegate) =>

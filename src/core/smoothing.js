@@ -135,6 +135,12 @@ export class LandmarkSmoother {
     return this.filterParams.minCutoff;
   }
 
+  reset() {
+    this.handStates.clear();
+    this.identityMatcher.reset();
+    this.lastTimestamp = null;
+  }
+
   smooth(
     hands,
     timestamp = performance.now(),

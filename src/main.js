@@ -1,6 +1,10 @@
 import './styles/main.css';
 import config from './config.js';
-import { startCamera, showStatus, describeCameraError } from './core/camera.js';
+import {
+  startCamera,
+  stopCamera,
+  describeCameraError,
+} from './core/camera.js';
 import { HandTracker } from './core/handTracker.js';
 import { LandmarkSmoother } from './core/smoothing.js';
 import { GestureDetector } from './gestures/gestureDetector.js';
@@ -22,7 +26,8 @@ const sceneManager = new SceneManager(sceneCanvas, video, config.scene);
 const ui = new UiController({
   hud,
   sceneManager,
-  onStart: () => start(),
+  onStart: () => startSession(),
+  onStop: () => stopSession(),
 });
 
 const initialSmoothing = smoother.getParameters();
@@ -36,8 +41,9 @@ const debugState = {
 let latestHands = [];
 let latestGestureState = null;
 let lastDetectionTimestamp = null;
+let renderFrameId = null;
+let sessionActive = false;
 let starting = false;
-let started = false;
 
 function syncSmoothingDebug() {
   const parameters = smoother.getParameters();
@@ -69,17 +75,59 @@ function handleHands(hands, timestamp) {
 }
 
 function renderFrame() {
+  if (!sessionActive) return;
+  renderFrameId = requestAnimationFrame(renderFrame);
+
   sceneManager.update(latestGestureState, latestHands);
   debugState.persist = sceneManager.getPersistDebug();
   debugState.thermal = sceneManager.getThermalDebug();
   debugState.box = sceneManager.getBoxDebug();
   hud.render(latestHands, video, debugState);
   ui.sync();
-  requestAnimationFrame(renderFrame);
 }
 
-async function start() {
-  if (starting || started) return;
+// Wipe every runtime module back to its initial state so a restart behaves like
+// a fresh page load without reloading.
+function resetRuntimeState() {
+  smoother.reset();
+  gestureDetector.reset();
+  sceneManager.reset();
+  hud.clear();
+
+  latestHands = [];
+  latestGestureState = null;
+  lastDetectionTimestamp = null;
+  debugState.gestureState = null;
+  debugState.detectionRate = 0;
+  debugState.persist = null;
+  debugState.thermal = null;
+  debugState.box = null;
+  syncSmoothingDebug();
+}
+
+// A new track is created for every session, so this listener is never doubled.
+function watchStream(stream) {
+  const track = stream?.getVideoTracks?.()[0];
+  if (!track) return;
+
+  track.addEventListener('ended', async () => {
+    if (!sessionActive) return;
+    await stopSession();
+    ui.showError(config.ui.strings.cameraEnded);
+  });
+}
+
+function handleTrackingError(error) {
+  if (!sessionActive) return;
+  stopSession().then(() => {
+    ui.showError(
+      config.ui.strings.trackingStopped.replace('{message}', error.message),
+    );
+  });
+}
+
+async function startSession() {
+  if (starting || sessionActive) return;
   starting = true;
 
   ui.setLoading(config.ui.strings.loadingCamera);
@@ -90,8 +138,9 @@ async function start() {
     await ui.requestFullscreen();
   }
 
+  let stream;
   try {
-    await startCamera(video, statusElement);
+    stream = await startCamera(video, statusElement);
   } catch (error) {
     starting = false;
     // camera.js already produced a clear, localized message.
@@ -99,35 +148,62 @@ async function start() {
     return;
   }
 
-  ui.setLoading(config.ui.strings.loadingModel);
-
-  try {
-    await handTracker.init();
-  } catch (error) {
-    starting = false;
-    ui.showError(
-      config.ui.strings.modelFailed.replace('{message}', error.message),
-    );
-    return;
+  // Reuse the landmarker across sessions; only the first start loads the model.
+  if (!handTracker.isInitialized()) {
+    ui.setLoading(config.ui.strings.loadingModel);
+    try {
+      await handTracker.init();
+    } catch (error) {
+      starting = false;
+      stopCamera(video);
+      ui.showError(
+        config.ui.strings.modelFailed.replace('{message}', error.message),
+      );
+      return;
+    }
   }
 
-  handTracker.start(video, handleHands, (error) => {
-    lastDetectionTimestamp = null;
-    debugState.detectionRate = 0;
-    latestHands = [];
-    latestGestureState = null;
-    debugState.gestureState = null;
-    showStatus(
-      statusElement,
-      config.ui.strings.trackingStopped.replace('{message}', error.message),
-      true,
-    );
-  });
+  resetRuntimeState();
+  watchStream(stream);
 
   starting = false;
-  started = true;
+  sessionActive = true;
   ui.finishStart();
-  requestAnimationFrame(renderFrame);
+
+  handTracker.start(video, handleHands, handleTrackingError);
+  renderFrameId = requestAnimationFrame(renderFrame);
+}
+
+async function stopSession() {
+  sessionActive = false;
+  starting = false;
+
+  if (renderFrameId !== null) {
+    cancelAnimationFrame(renderFrameId);
+    renderFrameId = null;
+  }
+
+  handTracker.stop();
+  // No recording feature exists yet; if one is added, stop and discard it here.
+  stopCamera(video);
+
+  resetRuntimeState();
+
+  const fullscreenElement =
+    document.fullscreenElement || document.webkitFullscreenElement;
+  if (fullscreenElement) {
+    try {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
+    } catch {
+      // Ignore; some browsers reject exitFullscreen when not active.
+    }
+  }
+
+  ui.showLanding();
 }
 
 // The renderer, orthographic camera, box perspective camera and video cover all

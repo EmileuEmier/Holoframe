@@ -312,6 +312,16 @@ export class FramePanel {
     this.group.visible = this.opacity > 0.001;
   }
 
+  reset() {
+    this.opacity = 0;
+    this.initialized = false;
+    this.fillMaterial.opacity = 0;
+    this.lineMaterial.opacity = 0;
+    this.lineMaterial2.opacity = 0;
+    this.line2.visible = false;
+    this.group.visible = false;
+  }
+
   dispose() {
     this.texture.dispose();
     this.meshGeometry.dispose();
@@ -527,6 +537,19 @@ export class VictoryShard {
     this.glowMaterial.opacity = this.opacity * this.options.glowOpacity;
     this.lineMaterial.opacity = this.opacity * this.options.lineOpacity;
     this.group.visible = this.opacity > 0.001;
+  }
+
+  reset() {
+    this.opacity = 0;
+    this.initialized = false;
+    this.active = false;
+    this.activeSince = null;
+    this.handId = null;
+    this.lastSeen = 0;
+    this.fillMaterial.opacity = 0;
+    this.glowMaterial.opacity = 0;
+    this.lineMaterial.opacity = 0;
+    this.group.visible = false;
   }
 
   dispose() {

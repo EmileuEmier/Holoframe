@@ -581,6 +581,23 @@ export class FingerPrism {
     this.writeGeometry();
   }
 
+  reset() {
+    this.pop = 0;
+    this.popFrom = 0;
+    this.popTarget = 0;
+    this.popStart = 0;
+    this.popAnimating = false;
+    this.initialized = false;
+    this.wasActive = false;
+
+    this.opacityUniform.value = 0;
+    this.hatchMaterial.opacity = 0;
+    this.lineMaterial.opacity = 0;
+    this.glowMaterial.opacity = 0;
+    this.pointsMaterial.opacity = 0;
+    this.group.visible = false;
+  }
+
   dispose() {
     this.geometry.dispose();
     for (const material of new Set(this.materials)) {

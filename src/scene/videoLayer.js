@@ -175,6 +175,12 @@ export class VideoLayer {
     return this.mix;
   }
 
+  reset() {
+    this.mix = 0;
+    this.material.uniforms.uMix.value = 0;
+    this.mesh.visible = false;
+  }
+
   dispose() {
     this.geometry.dispose();
     this.material.dispose();

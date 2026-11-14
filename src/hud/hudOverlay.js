@@ -299,6 +299,23 @@ export class HudOverlay {
     ctx.fillText(`  ${frameText}`, padding, y);
     y += lineHeight;
 
+    const boxDebug = debugState.box;
+    if (boxDebug) {
+      const w = Math.round(Number(boxDebug.width ?? 0));
+      const h = Math.round(Number(boxDebug.height ?? 0));
+      const d = Math.round(Number(boxDebug.depth ?? 0));
+      const toDeg = 180 / Math.PI;
+      const roll = Number(boxDebug.roll ?? 0) * toDeg;
+      const yaw = Number(boxDebug.yaw ?? 0) * toDeg;
+      const pitch = Number(boxDebug.pitch ?? 0) * toDeg;
+      ctx.fillText(
+        `box: ${boxDebug.active ? 'ON' : 'OFF'}  ${w} ${h} ${d}  ${roll.toFixed(0)} ${yaw.toFixed(0)} ${pitch.toFixed(0)}  A:${boxDebug.idA ?? '-'} B:${boxDebug.idB ?? '-'}`,
+        padding,
+        y,
+      );
+      y += lineHeight;
+    }
+
     const victoryCorners = gestureState?.victoryCorners;
     if (victoryCorners && victoryCorners.length >= 3) {
       const c0 = victoryCorners[0];

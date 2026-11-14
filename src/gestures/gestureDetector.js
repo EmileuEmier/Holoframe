@@ -15,6 +15,9 @@ const RING_TIP = 16;
 const PINKY_MCP = 17;
 const PINKY_TIP = 20;
 
+const PALM_LANDMARKS = [0, 5, 9, 13, 17];
+const PALM_LANDMARK_COUNT = PALM_LANDMARKS.length;
+
 // joint is the PIP (or MCP for the thumb) used in the distance comparison.
 const FINGERS = [
   { tip: THUMB_TIP, joint: THUMB_MCP },
@@ -119,8 +122,23 @@ export class GestureDetector {
       lastTimestamp: null,
     };
 
+    this.boxState = {
+      active: false,
+      enterStartedAt: null,
+      exitStartedAt: null,
+      idA: null,
+      idB: null,
+    };
+    this.boxPalmA = { x: 0, y: 0 };
+    this.boxPalmB = { x: 0, y: 0 };
+
     this.result = {
       hands: [],
+      box: {
+        active: false,
+        idA: null,
+        idB: null,
+      },
       twoHands: {
         active: false,
         distance: 0,
@@ -778,6 +796,171 @@ export class GestureDetector {
     twoHands.idB = frameState.idB;
   }
 
+  computePalmCenter(hand, aspectRatio, target) {
+    const landmarks = hand.landmarks;
+    if (!landmarks) return false;
+
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < PALM_LANDMARK_COUNT; i += 1) {
+      const landmark = landmarks[PALM_LANDMARKS[i]];
+      if (!landmark) return false;
+      x += landmark.x;
+      y += landmark.y;
+    }
+    // Aspect-corrected normalized units: x and y share the same scale.
+    target.x = (x / PALM_LANDMARK_COUNT) * aspectRatio;
+    target.y = y / PALM_LANDMARK_COUNT;
+    return true;
+  }
+
+  isBoxEligible(handResult, frame) {
+    if (!handResult || !handResult.openPalm) return false;
+    if (handResult.victory || handResult.fist) return false;
+    if (
+      frame?.active &&
+      (handResult.id === frame.idA || handResult.id === frame.idB)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  updateBox(hands, handResults, aspectRatio, timestamp) {
+    const box = this.result.box;
+    const state = this.boxState;
+    const frame = this.result.twoHands;
+    const minDistance = config.box.minHandDistance * aspectRatio;
+    const exitDistance = minDistance * config.box.exitDistanceRatio;
+
+    if (!state.active) {
+      let indexA = -1;
+      let indexB = -1;
+      for (let i = 0; i < hands.length && i < handResults.length; i += 1) {
+        if (!this.isBoxEligible(handResults[i], frame)) continue;
+        if (indexA < 0) {
+          indexA = i;
+        } else {
+          indexB = i;
+          break;
+        }
+      }
+
+      let farEnough = false;
+      if (
+        indexA >= 0 &&
+        indexB >= 0 &&
+        hands[indexA].id != null &&
+        hands[indexB].id != null
+      ) {
+        const hasA = this.computePalmCenter(
+          hands[indexA],
+          aspectRatio,
+          this.boxPalmA,
+        );
+        const hasB = this.computePalmCenter(
+          hands[indexB],
+          aspectRatio,
+          this.boxPalmB,
+        );
+        farEnough =
+          hasA &&
+          hasB &&
+          Math.hypot(
+            this.boxPalmA.x - this.boxPalmB.x,
+            this.boxPalmA.y - this.boxPalmB.y,
+          ) >= minDistance;
+      }
+
+      if (farEnough) {
+        if (state.enterStartedAt === null) state.enterStartedAt = timestamp;
+        if (timestamp - state.enterStartedAt >= config.box.enterMs) {
+          state.active = true;
+          state.enterStartedAt = null;
+          state.exitStartedAt = null;
+          // A is the hand with the smaller palm x at activation. Both ids stay
+          // frozen until the box deactivates, like the frame sides.
+          if (this.boxPalmA.x <= this.boxPalmB.x) {
+            state.idA = hands[indexA].id;
+            state.idB = hands[indexB].id;
+          } else {
+            state.idA = hands[indexB].id;
+            state.idB = hands[indexA].id;
+          }
+        }
+      } else {
+        state.enterStartedAt = null;
+      }
+
+      if (!state.active) {
+        box.active = false;
+        box.idA = null;
+        box.idB = null;
+        return;
+      }
+    }
+
+    // Active: follow the frozen ids and keep the box through short dropouts.
+    let handA = -1;
+    let handB = -1;
+    for (let i = 0; i < hands.length; i += 1) {
+      const id = hands[i].id;
+      if (id === state.idA) {
+        handA = i;
+      } else if (id === state.idB) {
+        handB = i;
+      }
+    }
+
+    let keep = false;
+    let lossWindow = config.box.graceMs;
+    if (handA >= 0 && handB >= 0) {
+      const hasA = this.computePalmCenter(
+        hands[handA],
+        aspectRatio,
+        this.boxPalmA,
+      );
+      const hasB = this.computePalmCenter(
+        hands[handB],
+        aspectRatio,
+        this.boxPalmB,
+      );
+      const farEnough =
+        hasA &&
+        hasB &&
+        Math.hypot(
+          this.boxPalmA.x - this.boxPalmB.x,
+          this.boxPalmA.y - this.boxPalmB.y,
+        ) >= exitDistance;
+      keep =
+        farEnough &&
+        this.isBoxEligible(handResults[handA], frame) &&
+        this.isBoxEligible(handResults[handB], frame);
+      lossWindow = config.box.exitMs;
+    }
+
+    if (keep) {
+      state.exitStartedAt = null;
+    } else {
+      if (state.exitStartedAt === null) state.exitStartedAt = timestamp;
+      if (timestamp - state.exitStartedAt >= lossWindow) {
+        state.active = false;
+        state.enterStartedAt = null;
+        state.exitStartedAt = null;
+        state.idA = null;
+        state.idB = null;
+        box.active = false;
+        box.idA = null;
+        box.idB = null;
+        return;
+      }
+    }
+
+    box.active = true;
+    box.idA = state.idA;
+    box.idB = state.idB;
+  }
+
   detect(
     hands,
     aspectRatio = config.camera.width / config.camera.height,
@@ -856,6 +1039,7 @@ export class GestureDetector {
     }
 
     this.updateTwoHands(hands, this.result.hands, aspectRatio, timestamp);
+    this.updateBox(hands, this.result.hands, aspectRatio, timestamp);
     return this.result;
   }
 }

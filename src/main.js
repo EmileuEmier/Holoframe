@@ -63,6 +63,7 @@ function renderFrame() {
   sceneManager.update(latestGestureState, latestHands);
   debugState.persist = sceneManager.getPersistDebug();
   debugState.thermal = sceneManager.getThermalDebug();
+  debugState.box = sceneManager.getBoxDebug();
   hud.render(latestHands, video, debugState);
   requestAnimationFrame(renderFrame);
 }

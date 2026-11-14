@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import config from '../config.js';
 import { getCoverTransform, landmarkToScreen } from '../core/screenMapping.js';
 import { FramePanel, VictoryShard, FrozenShape } from './shapes.js';
+import { BoxSlab } from './box.js';
 import { VideoLayer } from './videoLayer.js';
 
 const CORNER_COUNT = 4;
@@ -171,13 +172,42 @@ export class SceneManager {
       antialias: true,
     });
     this.renderer.setClearColor(0x000000, 0);
-    this.renderer.autoClear = true;
+    this.renderer.autoClear = false;
 
     this.scene = new THREE.Scene();
     // Camera planes use CSS pixels with y increasing downward, matching the HUD
     // and the shared screen mapping exactly.
     this.camera = new THREE.OrthographicCamera(0, 1, 0, 1, 0.1, 100);
     this.camera.position.z = 10;
+
+    // Separate perspective pass for the 3D slab. The camera is placed so the
+    // world z = 0 plane spans exactly the viewport in CSS pixels.
+    this.sceneBox = new THREE.Scene();
+    this.boxCamera = new THREE.PerspectiveCamera(config.box.fov, 1, 0.1, 100000);
+    this.boxCamera.position.set(0, 0, 1000);
+    this.boxCamera.lookAt(0, 0, 0);
+
+    this.boxSlab = new BoxSlab(config.box);
+    this.sceneBox.add(this.boxSlab.group);
+
+    this.boxHands = {
+      a: { x: 0, y: 0, size: 0, valid: false },
+      b: { x: 0, y: 0, size: 0, valid: false },
+    };
+    this.boxPalmCenter = { x: 0, y: 0 };
+    this.boxWrist = { x: 0, y: 0 };
+    this.boxMcp = { x: 0, y: 0 };
+    this.boxDebug = {
+      active: false,
+      width: 0,
+      height: 0,
+      depth: 0,
+      roll: 0,
+      yaw: 0,
+      pitch: 0,
+      idA: null,
+      idB: null,
+    };
 
     this.width = 0;
     this.height = 0;
@@ -247,6 +277,17 @@ export class SceneManager {
     this.camera.bottom = this.height;
     this.camera.updateProjectionMatrix();
 
+    // Distance where the vertical FOV covers exactly the viewport height, so
+    // one world unit equals one CSS pixel on z = 0.
+    const halfFov = THREE.MathUtils.degToRad(this.boxCamera.fov) * 0.5;
+    const cameraZ = this.height * 0.5 / Math.max(Math.tan(halfFov), 1e-6);
+    this.boxCamera.aspect = this.width / Math.max(1, this.height);
+    this.boxCamera.position.set(0, 0, cameraZ);
+    this.boxCamera.near = 0.1;
+    this.boxCamera.far = cameraZ * 2 + 2000;
+    this.boxCamera.lookAt(0, 0, 0);
+    this.boxCamera.updateProjectionMatrix();
+
     const transform = getCoverTransform(
       this.video,
       this.width,
@@ -303,6 +344,7 @@ export class SceneManager {
 
     this.updateVictoryShards(gestureState, hands, transform, dt, now);
     this.updateWipe(gestureState, hands, aspectRatio, now);
+    this.updateBox(gestureState, hands, transform, dt, now);
     this.updateThermal(gestureState, now);
     this.videoLayer.update(dt, this.thermalTarget, now);
     this.thermalDebug.enabled = this.thermalTarget === 1;
@@ -312,7 +354,12 @@ export class SceneManager {
     this.thermalDebug.holdMs = config.thermal.holdMs;
     this.updateStamps(now);
 
+    // Orthographic overlay first, then the perspective slab on a fresh depth
+    // buffer so it always composites in front of the existing visuals.
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    this.renderer.clearDepth();
+    this.renderer.render(this.sceneBox, this.boxCamera);
   }
 
   isVictoryShardActive(gestureHands, handIndex) {
@@ -436,6 +483,79 @@ export class SceneManager {
         ? firstActiveShard.smoothedPoints
         : null;
     }
+  }
+
+  updateBox(gestureState, hands, transform, dt, now) {
+    const box = gestureState?.box;
+    const active = Boolean(box?.active);
+    const data = this.boxHands;
+    data.a.valid = false;
+    data.b.valid = false;
+
+    if (active) {
+      for (let i = 0; i < hands.length; i += 1) {
+        const hand = hands[i];
+        const id = hand.id;
+        if (id == null || !hand.landmarks) continue;
+
+        let target = null;
+        if (id === box.idA) {
+          target = data.a;
+        } else if (id === box.idB) {
+          target = data.b;
+        } else {
+          continue;
+        }
+
+        const landmarks = hand.landmarks;
+        let palmX = 0;
+        let palmY = 0;
+        let valid = true;
+        for (let k = 0; k < PALM_LANDMARK_COUNT; k += 1) {
+          const landmark = landmarks[PALM_LANDMARKS[k]];
+          if (!landmark) {
+            valid = false;
+            break;
+          }
+          palmX += landmark.x;
+          palmY += landmark.y;
+        }
+        if (!valid) continue;
+
+        // Same landmark -> screen mapping as the HUD.
+        this.boxPalmCenter.x = palmX / PALM_LANDMARK_COUNT;
+        this.boxPalmCenter.y = palmY / PALM_LANDMARK_COUNT;
+        landmarkToScreen(this.boxPalmCenter, transform, target);
+
+        const wrist = landmarks[0];
+        const middleMcp = landmarks[9];
+        if (!wrist || !middleMcp) continue;
+        landmarkToScreen(wrist, transform, this.boxWrist);
+        landmarkToScreen(middleMcp, transform, this.boxMcp);
+        target.size = Math.hypot(
+          this.boxMcp.x - this.boxWrist.x,
+          this.boxMcp.y - this.boxWrist.y,
+        );
+        target.valid = true;
+      }
+    }
+
+    this.boxSlab.update(active, data, this.width, this.height, dt, now);
+
+    const debug = this.boxDebug;
+    debug.active = active;
+    debug.width = this.boxSlab.width;
+    debug.height = this.boxSlab.height;
+    debug.depth = this.boxSlab.depth;
+    debug.roll = this.boxSlab.roll;
+    debug.yaw = this.boxSlab.yaw;
+    debug.pitch = this.boxSlab.pitch;
+    debug.idA = box?.idA ?? null;
+    debug.idB = box?.idB ?? null;
+  }
+
+  getBoxDebug() {
+    return this.boxDebug;
   }
 
   updateThermal(gestureState, now) {
@@ -616,6 +736,7 @@ export class SceneManager {
   updateWipe(gestureState, hands, aspectRatio, now) {
     const gestureHands = gestureState?.hands;
     const frame = gestureState?.twoHands;
+    const box = gestureState?.box;
 
     for (let i = 0; i < hands.length; i += 1) {
       const hand = hands[i];
@@ -661,7 +782,10 @@ export class SceneManager {
         frame?.active && (id === frame.idA || id === frame.idB),
       );
       const inVictory = Boolean(handState?.victory);
-      if (inFrame || inVictory || !result.valid) continue;
+      const inBox = Boolean(
+        box?.active && (id === box.idA || id === box.idB),
+      );
+      if (inFrame || inVictory || inBox || !result.valid) continue;
       if (result.distanceRatio < 1) continue;
       if (result.speedRatio < 1) continue;
       if (!result.horizontal) continue;
@@ -719,6 +843,8 @@ export class SceneManager {
     for (const shard of this.victoryShards) {
       shard.dispose();
     }
+    this.sceneBox.remove(this.boxSlab.group);
+    this.boxSlab.dispose();
     this.renderer.dispose();
   }
 }

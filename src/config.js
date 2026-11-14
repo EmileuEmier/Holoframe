@@ -84,6 +84,36 @@ const config = {
     swapHysteresis: 0.1,
   },
 
+  box: {
+    // Separate perspective pass calibrated so world z=0 maps 1:1 to CSS px.
+    fov: 40,
+    // Two open palms further apart than this fraction of the screen width.
+    minHandDistance: 0.25,
+    enterMs: 120,
+    exitMs: 180,
+    // Keep an active box through brief tracking dropouts.
+    graceMs: 250,
+    // Distance hysteresis when leaving: exit below this fraction of the enter
+    // distance.
+    exitDistanceRatio: 0.8,
+    widthScale: 1.0,
+    heightRatio: 0.35,
+    minHeightPx: 60,
+    maxHeightPx: 400,
+    depthRatio: 0.5,
+    minDepthPx: 40,
+    maxDepthPx: 600,
+    yawGain: 1.5,
+    maxYaw: 0.9,
+    basePitchDeg: 18,
+    motionSmoothing: 20,
+    popMs: 220,
+    baseColor: '#9b6bff',
+    baseOpacity: 0.35,
+    lineColor: '#ffffff',
+    lineOpacity: 0.9,
+  },
+
   victory: {
     // One shard per hand slot; slot colors stay attached to persistent hand ids.
     maxShards: 2,

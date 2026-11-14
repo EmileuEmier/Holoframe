@@ -41,8 +41,31 @@
       </div>
     </div>
 
-    <div id="toolbar" class="toolbar" role="toolbar" aria-label="Kontroller" hidden></div>
+    <div id="toolbar" class="toolbar" role="toolbar" aria-label="Controls" hidden></div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="rec-pill" class="rec-pill" role="status" aria-live="polite" hidden>
+      <span class="rec-pill__dot" aria-hidden="true"></span>
+      <span id="rec-pill-time" class="rec-pill__time"></span>
+    </div>
+
+    <div id="flash" class="flash" aria-hidden="true"></div>
+
+    <div id="result" class="result" hidden>
+      <div class="result__card" role="dialog" aria-modal="true" aria-labelledby="result-title">
+        <h2 class="result__title" id="result-title"></h2>
+        <div class="result__preview" id="result-preview"></div>
+        <div class="result__meta">
+          <span class="result__name" id="result-name"></span>
+          <span class="result__size" id="result-size"></span>
+        </div>
+        <div class="result__actions">
+          <button type="button" class="result__btn result__btn--primary" id="result-save"></button>
+          <button type="button" class="result__btn" id="result-share" hidden></button>
+          <button type="button" class="result__btn" id="result-close"></button>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="/src/main.js"></script>
   </body>

@@ -42,4 +42,17 @@ export const icons = {
 
   // Stop square: end the session and return to the landing page.
   stop: svg('<rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/>'),
+
+  // Record: a filled red dot (the button color is set in CSS).
+  record: svg('<circle cx="12" cy="12" r="6.2" fill="currentColor" stroke="none"/>'),
+
+  // Record active: a filled square shown while recording.
+  recordActive: svg(
+    '<rect x="6.5" y="6.5" width="11" height="11" rx="2.2" fill="currentColor" stroke="none"/>',
+  ),
+
+  // Photo: camera aperture/shutter.
+  photo: svg(
+    '<path d="M4 8.6A1.6 1.6 0 0 1 5.6 7h2.1l1.1-1.6A1.4 1.4 0 0 1 10 4.8h4a1.4 1.4 0 0 1 1.2.6L16.3 7h2.1A1.6 1.6 0 0 1 20 8.6v8.8A1.6 1.6 0 0 1 18.4 19H5.6A1.6 1.6 0 0 1 4 17.4Z"/><circle cx="12" cy="12.6" r="3.3"/>',
+  ),
 };

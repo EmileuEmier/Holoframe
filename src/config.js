@@ -226,6 +226,22 @@ const config = {
     },
   },
 
+  recording: {
+    // Screen recorder output. Width is capped so the composited canvas stays
+    // cheap to draw every frame on phones.
+    fps: 30,
+    maxWidth: 1280,
+    // Auto-stop after this many seconds and show the result card.
+    maxSeconds: 120,
+    // The HUD (landmark dots/brackets) is not burned into the recording by
+    // default; the thermal layer and shapes are always part of the scene.
+    includeHud: false,
+    // Target video bitrate at maxWidth; scaled down for narrower output.
+    bitrate: 5000000,
+    // Cancel an in-progress recording if the tab stays hidden this long.
+    hiddenCancelMs: 10000,
+  },
+
   hud: {
     enabled: true,
     maxDevicePixelRatio: 2,
@@ -295,6 +311,8 @@ const config = {
         landmarks: 'Hand points',
         debug: 'Debug',
         fullscreen: 'Fullscreen',
+        record: 'Record',
+        photo: 'Photo',
         stop: 'Stop',
       },
       toast: {
@@ -308,6 +326,19 @@ const config = {
         landmarksOff: 'Hand points: off',
         debugOn: 'Debug: on',
         debugOff: 'Debug: off',
+        recordingStarted: 'Recording started',
+        recordingStopped: 'Recording stopped',
+        photoCaptured: 'Photo captured',
+        recordingUnsupported: 'Recording is not supported in this browser',
+      },
+      recording: {
+        // Prefix shown in the top-center "REC 00:12" pill.
+        rec: 'REC',
+        videoTitle: 'Recording',
+        photoTitle: 'Photo',
+        save: 'Save',
+        share: 'Share',
+        close: 'Close',
       },
       // Reused by camera.js so the error text has a single source.
       camera: {
@@ -337,6 +368,8 @@ const config = {
     cyclePalette: 'p',
     cycleBoxUv: 'b',
     toggleDebug: 'd',
+    record: 'r',
+    photo: 'v',
     betaDown: '[',
     betaUp: ']',
     minCutoffDown: ';',

@@ -10,6 +10,7 @@ import { LandmarkSmoother } from './core/smoothing.js';
 import { GestureDetector } from './gestures/gestureDetector.js';
 import { HudOverlay } from './hud/hudOverlay.js';
 import { SceneManager } from './scene/sceneManager.js';
+import { Recorder } from './ui/recorder.js';
 import { UiController } from './ui/uiController.js';
 
 const video = document.querySelector('#camera');
@@ -22,10 +23,12 @@ const smoother = new LandmarkSmoother(config.smoothing);
 const handTracker = new HandTracker();
 const gestureDetector = new GestureDetector(config.gestures);
 const sceneManager = new SceneManager(sceneCanvas, video, config.scene);
+const recorder = new Recorder({ video, sceneCanvas, hudCanvas });
 
 const ui = new UiController({
   hud,
   sceneManager,
+  recorder,
   onStart: () => startSession(),
   onStop: () => stopSession(),
 });
@@ -83,6 +86,9 @@ function renderFrame() {
   debugState.thermal = sceneManager.getThermalDebug();
   debugState.box = sceneManager.getBoxDebug();
   hud.render(latestHands, video, debugState);
+  // Must run in the same frame right after the scene renders: the WebGL canvas
+  // has no preserveDrawingBuffer, so reading it later returns an empty image.
+  recorder.captureFrame();
   ui.sync();
 }
 
@@ -184,7 +190,9 @@ async function stopSession() {
   }
 
   handTracker.stop();
-  // No recording feature exists yet; if one is added, stop and discard it here.
+  // Cancel any active recording (no result card), close the result card and
+  // release the offscreen compositor canvas.
+  ui.resetCapture();
   stopCamera(video);
 
   resetRuntimeState();
@@ -266,6 +274,18 @@ window.addEventListener('keydown', (event) => {
 
   if (key.toLowerCase() === config.controls.toggleDebug) {
     hud.toggleDebugText();
+    event.preventDefault();
+    return;
+  }
+
+  if (key.toLowerCase() === config.controls.record) {
+    ui.toggleRecord();
+    event.preventDefault();
+    return;
+  }
+
+  if (key.toLowerCase() === config.controls.photo) {
+    ui.takePhoto();
     event.preventDefault();
     return;
   }

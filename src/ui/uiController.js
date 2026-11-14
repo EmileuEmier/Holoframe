@@ -17,10 +17,28 @@ function getFullscreenElement() {
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
 
+function formatClock(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const index = Math.min(
+    units.length - 1,
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+  );
+  const value = bytes / 1024 ** index;
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
 export class UiController {
-  constructor({ hud, sceneManager, onStart, onStop }) {
+  constructor({ hud, sceneManager, recorder, onStart, onStop }) {
     this.hud = hud;
     this.sceneManager = sceneManager;
+    this.recorder = recorder;
     this.onStart = onStart;
     this.onStop = onStop;
 
@@ -34,14 +52,40 @@ export class UiController {
     this.stopTimer = null;
     this.landingHideTimer = null;
     this.stopButton = null;
+    this.recordButton = null;
     this.buttons = [];
+
+    this.recordUiActive = false;
+    this.recPillSeconds = -1;
+    this.flashTimer = null;
+    this.resultUrl = null;
+    this.resultFile = null;
 
     this.landing = document.querySelector('#landing');
     this.toolbar = document.querySelector('#toolbar');
     this.toast = document.querySelector('#toast');
 
+    this.recPill = document.querySelector('#rec-pill');
+    this.recPillTime = document.querySelector('#rec-pill-time');
+    this.flashElement = document.querySelector('#flash');
+
+    this.result = document.querySelector('#result');
+    this.resultTitle = document.querySelector('#result-title');
+    this.resultPreview = document.querySelector('#result-preview');
+    this.resultName = document.querySelector('#result-name');
+    this.resultSize = document.querySelector('#result-size');
+    this.saveButton = document.querySelector('#result-save');
+    this.shareButton = document.querySelector('#result-share');
+    this.closeButton = document.querySelector('#result-close');
+
+    // The recorder drives the UI when a recording finishes (manual or auto).
+    if (this.recorder) {
+      this.recorder.onStop = (result) => this.handleRecordingStopped(result);
+    }
+
     this.buildLanding();
     this.buildToolbar();
+    this.buildResultCard();
     this.bindActivity();
     this.bindFullscreenEvents();
   }
@@ -217,6 +261,19 @@ export class UiController {
         active: () => Boolean(getFullscreenElement()),
       },
       {
+        id: 'record',
+        label: strings.toolbar.record,
+        icon: icons.record,
+        action: () => this.toggleRecord(),
+        active: () => Boolean(this.recorder?.isRecording),
+      },
+      {
+        id: 'photo',
+        label: strings.toolbar.photo,
+        icon: icons.photo,
+        action: () => this.takePhoto(),
+      },
+      {
         id: 'stop',
         label: strings.toolbar.stop,
         icon: icons.stop,
@@ -226,6 +283,9 @@ export class UiController {
 
     for (const definition of definitions) {
       if (definition.id === 'fullscreen' && !this.fullscreenSupported) continue;
+      // Recording needs MediaRecorder + canvas captureStream; hide the button
+      // entirely when neither is available.
+      if (definition.id === 'record' && !this.recorder?.isSupported()) continue;
 
       const button = document.createElement('button');
       button.type = 'button';
@@ -239,6 +299,7 @@ export class UiController {
       const entry = { definition, element: button };
       this.buttons.push(entry);
       if (definition.id === 'stop') this.stopButton = entry;
+      if (definition.id === 'record') this.recordButton = entry;
     }
   }
 
@@ -260,7 +321,202 @@ export class UiController {
       element.classList.toggle('is-active', active);
       element.setAttribute('aria-pressed', active ? 'true' : 'false');
     }
+    this.syncRecordUi();
     this.updateAutoHide();
+  }
+
+  // Swaps the Record icon (dot <-> square) and drives the REC pill from the
+  // recorder's live state so keyboard shortcuts and auto-stop stay in sync.
+  syncRecordUi() {
+    const recording = Boolean(this.recorder?.isRecording);
+
+    if (this.recordButton && recording !== this.recordUiActive) {
+      this.recordUiActive = recording;
+      const icon = this.recordButton.element.querySelector('.toolbar__icon');
+      if (icon) icon.outerHTML = recording ? icons.recordActive : icons.record;
+    }
+
+    if (recording) {
+      if (this.recPill.hidden) this.recPill.hidden = false;
+      const seconds = Math.floor(this.recorder.elapsedMs / 1000);
+      if (seconds !== this.recPillSeconds) {
+        this.recPillSeconds = seconds;
+        this.recPillTime.textContent = `${strings.recording.rec} ${formatClock(seconds)}`;
+      }
+    } else if (!this.recPill.hidden) {
+      this.hideRecPill();
+    }
+  }
+
+  hideRecPill() {
+    this.recPill.hidden = true;
+    this.recPillSeconds = -1;
+  }
+
+  // --- Record / Photo --------------------------------------------------------
+
+  toggleRecord() {
+    if (!this.recorder) return;
+    if (!this.recorder.isSupported()) {
+      this.showToast(strings.toast.recordingUnsupported);
+      return;
+    }
+
+    if (this.recorder.isRecording) {
+      this.recorder.stop();
+    } else {
+      this.startRecording();
+    }
+    this.markActivity();
+  }
+
+  async startRecording() {
+    try {
+      await this.recorder.start();
+      this.showToast(strings.toast.recordingStarted);
+    } catch {
+      this.showToast(strings.toast.recordingUnsupported);
+    }
+    this.syncRecordUi();
+    this.markActivity();
+  }
+
+  // Called by the recorder whenever a recording finishes (manual stop or the
+  // maxSeconds auto-stop), so both paths behave identically.
+  handleRecordingStopped(result) {
+    this.syncRecordUi();
+    if (!result) return;
+    this.showResult(result, 'video');
+    this.showToast(strings.toast.recordingStopped);
+  }
+
+  async takePhoto() {
+    if (!this.recorder) return;
+    this.flash();
+    this.markActivity();
+
+    const photo = await this.recorder.takePhoto();
+    if (!photo?.blob) return;
+
+    this.showResult(photo, 'photo');
+    this.showToast(strings.toast.photoCaptured);
+  }
+
+  // Short white flash overlay shown when a photo is captured.
+  flash() {
+    this.flashElement.classList.remove('is-visible');
+    // Force a reflow so the animation restarts on a rapid second capture.
+    void this.flashElement.offsetWidth;
+    this.flashElement.classList.add('is-visible');
+    window.clearTimeout(this.flashTimer);
+    this.flashTimer = window.setTimeout(() => {
+      this.flashElement.classList.remove('is-visible');
+    }, 150);
+  }
+
+  // --- Result card -----------------------------------------------------------
+
+  buildResultCard() {
+    this.resultTitle.textContent = '';
+    this.saveButton.textContent = strings.recording.save;
+    this.shareButton.textContent = strings.recording.share;
+    this.closeButton.textContent = strings.recording.close;
+
+    this.saveButton.addEventListener('click', () => this.saveResult());
+    this.shareButton.addEventListener('click', () => this.shareResult());
+    this.closeButton.addEventListener('click', () => this.closeResult());
+    this.result.addEventListener('click', (event) => {
+      if (event.target === this.result) this.closeResult();
+    });
+  }
+
+  showResult({ blob, filename, mimeType }, kind) {
+    this.closeResult();
+
+    const type = blob.type || mimeType || '';
+    const url = URL.createObjectURL(blob);
+    this.resultUrl = url;
+    this.resultKind = kind;
+
+    this.resultTitle.textContent =
+      kind === 'photo' ? strings.recording.photoTitle : strings.recording.videoTitle;
+
+    this.resultPreview.textContent = '';
+    let media;
+    if (kind === 'photo') {
+      media = document.createElement('img');
+      media.alt = filename;
+      media.src = url;
+    } else {
+      media = document.createElement('video');
+      media.controls = true;
+      media.playsInline = true;
+      media.src = url;
+    }
+    media.className = 'result__media';
+    this.resultPreview.append(media);
+
+    this.resultName.textContent = filename;
+    this.resultSize.textContent = formatBytes(blob.size);
+
+    this.resultFile = new File([blob], filename, { type });
+    let canShare = false;
+    try {
+      canShare = Boolean(
+        navigator.canShare && navigator.canShare({ files: [this.resultFile] }),
+      );
+    } catch {
+      canShare = false;
+    }
+    this.shareButton.hidden = !canShare;
+
+    this.result.hidden = false;
+  }
+
+  saveResult() {
+    if (!this.resultUrl || !this.resultFile) return;
+    const link = document.createElement('a');
+    link.href = this.resultUrl;
+    link.download = this.resultFile.name;
+    link.rel = 'noopener';
+    document.body.append(link);
+    link.click();
+    link.remove();
+  }
+
+  async shareResult() {
+    if (!this.resultFile) return;
+    try {
+      await navigator.share({ files: [this.resultFile] });
+    } catch {
+      // User dismissed the share sheet or sharing failed; nothing to do.
+    }
+  }
+
+  closeResult() {
+    if (this.resultUrl) {
+      URL.revokeObjectURL(this.resultUrl);
+      this.resultUrl = null;
+    }
+    this.resultFile = null;
+    this.resultPreview.textContent = '';
+    this.result.hidden = true;
+  }
+
+  // Stop button / session teardown: discard any active recording without a
+  // result card, close the card, and release the offscreen canvas.
+  resetCapture() {
+    this.recorder?.cancel();
+    this.recorder?.releaseCanvas();
+    this.closeResult();
+    this.hideRecPill();
+    this.flashElement.classList.remove('is-visible');
+
+    this.recordUiActive = false;
+    if (this.recordButton) {
+      const icon = this.recordButton.element.querySelector('.toolbar__icon');
+      if (icon) icon.outerHTML = icons.record;
+    }
   }
 
   // --- Stop (two-tap confirm) ------------------------------------------------

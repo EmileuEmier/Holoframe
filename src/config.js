@@ -7,7 +7,7 @@ const config = {
   },
 
   handTracking: {
-    modelPath: '/models/hand_landmarker.task',
+    modelPath: `${import.meta.env.BASE_URL}models/hand_landmarker.task`,
     wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.0/wasm',
     numHands: 2,
     delegate: 'GPU',

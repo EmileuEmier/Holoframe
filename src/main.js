@@ -235,6 +235,34 @@ if (window.visualViewport) {
 
 window.addEventListener('keydown', (event) => {
   const key = event.key;
+  const lowerKey = key.toLowerCase();
+
+  if (lowerKey === config.controls.help) {
+    ui.toggleHelp();
+    event.preventDefault();
+    return;
+  }
+
+  // While the Help dialog owns focus, only the dialog keys are handled.
+  if (ui.isHelpOpen()) {
+    if (key === 'Escape') {
+      ui.closeHelp();
+      event.preventDefault();
+    }
+    return;
+  }
+
+  if (lowerKey === config.controls.toggleFullscreen) {
+    ui.toggleFullscreen();
+    event.preventDefault();
+    return;
+  }
+
+  if (key === 'Escape' && ui.isResultOpen()) {
+    ui.closeResult();
+    event.preventDefault();
+    return;
+  }
 
   if (key.toLowerCase() === config.controls.toggleHud) {
     hud.toggle();

@@ -4,6 +4,9 @@
 const svg = (paths) =>
   `<svg class="toolbar__icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 
+const guideSvg = (paths) =>
+  `<svg class="guide-card__svg" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+
 export const icons = {
   // Thermometer: thermal filter.
   thermal: svg(
@@ -54,5 +57,36 @@ export const icons = {
   // Photo: camera aperture/shutter.
   photo: svg(
     '<path d="M4 8.6A1.6 1.6 0 0 1 5.6 7h2.1l1.1-1.6A1.4 1.4 0 0 1 10 4.8h4a1.4 1.4 0 0 1 1.2.6L16.3 7h2.1A1.6 1.6 0 0 1 20 8.6v8.8A1.6 1.6 0 0 1 18.4 19H5.6A1.6 1.6 0 0 1 4 17.4Z"/><circle cx="12" cy="12.6" r="3.3"/>',
+  ),
+
+  // Question mark: open the Help dialog.
+  help: svg(
+    '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.7 2.2c-.8.5-1.3 1-1.3 2"/><circle cx="12" cy="17.1" r="0.8" fill="currentColor" stroke="none"/>',
+  ),
+
+  // X: close the Help dialog.
+  close: svg('<path d="M6 6l12 12"/><path d="M18 6 6 18"/>'),
+};
+
+// Small line pictograms shown once per gesture in the guide cards. They are
+// keyed by config.ui.guide[].id so the guide text stays data-only.
+export const guideIcons = {
+  'l-frame': guideSvg(
+    '<path d="M4 4v9h7"/><path d="M20 20v-9h-7"/><path d="M11 13h2"/>',
+  ),
+  'v-sign': guideSvg(
+    '<path d="m7 5 5 12 5-12"/><path d="M9 20h6"/><path d="M12 17v3"/>',
+  ),
+  fist: guideSvg(
+    '<path d="M7 12V9a1.5 1.5 0 0 1 3 0v2"/><path d="M10 11V7.5a1.5 1.5 0 0 1 3 0V11"/><path d="M13 11V8.5a1.5 1.5 0 0 1 3 0V13"/><path d="M16 13v-1.5a1.5 1.5 0 0 1 3 0V16a4 4 0 0 1-4 4h-4a5 5 0 0 1-5-5v-2a1.5 1.5 0 0 1 3 0"/>',
+  ),
+  'open-hands': guideSvg(
+    '<path d="M3 14V9a1.3 1.3 0 0 1 2.6 0v3"/><path d="M5.6 12V7a1.3 1.3 0 0 1 2.6 0v5"/><path d="M8.2 12V8.5a1.3 1.3 0 0 1 2.6 0V16a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4v-2"/><path d="M21 14V9a1.3 1.3 0 0 0-2.6 0v3"/><path d="M18.4 12V7a1.3 1.3 0 0 0-2.6 0v5"/><path d="M15.8 12V8.5a1.3 1.3 0 0 0-2.6 0V16a4 4 0 0 0 4 4h.6a4 4 0 0 0 4-4v-2"/>',
+  ),
+  sweep: guideSvg(
+    '<path d="M3 8h15"/><path d="m15 4 4 4-4 4"/><path d="M5 14h11"/><path d="M7 19h7"/>',
+  ),
+  persist: guideSvg(
+    '<rect x="3.5" y="3.5" width="13" height="13" rx="2"/><rect x="7.5" y="7.5" width="13" height="13" rx="2"/><circle cx="20.2" cy="4.2" r="0.9" fill="currentColor" stroke="none"/>',
   ),
 };

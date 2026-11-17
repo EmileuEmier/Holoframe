@@ -26,22 +26,43 @@
 
     <div id="landing" class="landing">
       <div class="landing__inner">
-        <h1 class="landing__title" id="landing-title"></h1>
-        <p class="landing__tagline" id="landing-tagline"></p>
-        <ul class="landing__gestures" id="landing-gestures"></ul>
-        <p class="landing__privacy" id="landing-privacy"></p>
-        <label class="landing__check" id="landing-fullscreen-row">
-          <input type="checkbox" id="landing-fullscreen" />
-          <span id="landing-fullscreen-label"></span>
-        </label>
-        <button type="button" id="landing-start" class="landing__start"></button>
-        <p class="landing__error" id="landing-error" hidden></p>
-        <button type="button" id="landing-retry" class="landing__retry" hidden></button>
+        <div class="landing__intro">
+          <h1 class="landing__title" id="landing-title"></h1>
+          <p class="landing__tagline" id="landing-tagline"></p>
+          <p class="landing__privacy" id="landing-privacy"></p>
+          <label class="landing__check" id="landing-fullscreen-row">
+            <input type="checkbox" id="landing-fullscreen" />
+            <span id="landing-fullscreen-label"></span>
+          </label>
+          <button type="button" id="landing-start" class="landing__start"></button>
+          <p class="landing__start-tip" id="landing-start-tip"></p>
+          <p class="landing__error" id="landing-error" hidden></p>
+          <button type="button" id="landing-retry" class="landing__retry" hidden></button>
+        </div>
+        <div id="landing-guide" class="landing__guide"></div>
         <footer class="landing__footer" id="landing-credit"></footer>
       </div>
     </div>
 
     <div id="toolbar" class="toolbar" role="toolbar" aria-label="Controls" hidden></div>
+
+    <div
+      id="help"
+      class="help"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="help-title"
+      hidden
+    >
+      <div class="help__card">
+        <div class="help__header">
+          <h2 class="help__title" id="help-title"></h2>
+          <button type="button" class="help__close" id="help-close"></button>
+        </div>
+        <div class="help__body" id="help-content"></div>
+        <footer class="help__footer" id="help-credit"></footer>
+      </div>
+    </div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <div id="rec-pill" class="rec-pill" role="status" aria-live="polite" hidden>

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/Holoframe/favicon.svg" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+    />
+    <meta
+      name="description"
+      content="Holoframe is a real-time webcam hand-tracking AR app that runs entirely in your browser."
+    />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Holoframe" />
+    <title>Holoframe</title>
+    <script type="module" crossorigin src="/Holoframe/assets/index-DLthb3Uq.js"></script>
+    <link rel="stylesheet" crossorigin href="/Holoframe/assets/index-CMslcBnM.css">
+  </head>
+  <body>
+    <video id="camera" class="camera-video" autoplay muted playsinline></video>
+    <canvas id="scene" class="scene-canvas" aria-hidden="true"></canvas>
+    <canvas id="hud" class="hud-canvas" aria-hidden="true"></canvas>
+    <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+
+    <div id="landing" class="landing">
+      <div class="landing__inner">
+        <div class="landing__intro">
+          <h1 class="landing__title" id="landing-title"></h1>
+          <p class="landing__tagline" id="landing-tagline"></p>
+          <p class="landing__privacy" id="landing-privacy"></p>
+          <label class="landing__check" id="landing-fullscreen-row">
+            <input type="checkbox" id="landing-fullscreen" />
+            <span id="landing-fullscreen-label"></span>
+          </label>
+          <button type="button" id="landing-start" class="landing__start"></button>
+          <p class="landing__start-tip" id="landing-start-tip"></p>
+          <p class="landing__error" id="landing-error" hidden></p>
+          <button type="button" id="landing-retry" class="landing__retry" hidden></button>
+        </div>
+        <div id="landing-guide" class="landing__guide"></div>
+        <footer class="landing__footer" id="landing-credit"></footer>
+      </div>
+    </div>
+
+    <div id="toolbar" class="toolbar" role="toolbar" aria-label="Controls" hidden></div>
+
+    <div
+      id="help"
+      class="help"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="help-title"
+      hidden
+    >
+      <div class="help__card">
+        <div class="help__header">
+          <h2 class="help__title" id="help-title"></h2>
+          <button type="button" class="help__close" id="help-close"></button>
+        </div>
+        <div class="help__body" id="help-content"></div>
+        <footer class="help__footer" id="help-credit"></footer>
+      </div>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="rec-pill" class="rec-pill" role="status" aria-live="polite" hidden>
+      <span class="rec-pill__dot" aria-hidden="true"></span>
+      <span id="rec-pill-time" class="rec-pill__time"></span>
+    </div>
+
+    <div id="flash" class="flash" aria-hidden="true"></div>
+
+    <div id="result" class="result" hidden>
+      <div class="result__card" role="dialog" aria-modal="true" aria-labelledby="result-title">
+        <h2 class="result__title" id="result-title"></h2>
+        <div class="result__preview" id="result-preview"></div>
+        <div class="result__meta">
+          <span class="result__name" id="result-name"></span>
+          <span class="result__size" id="result-size"></span>
+        </div>
+        <div class="result__actions">
+          <button type="button" class="result__btn result__btn--primary" id="result-save"></button>
+          <button type="button" class="result__btn" id="result-share" hidden></button>
+          <button type="button" class="result__btn" id="result-close"></button>
+        </div>
+      </div>
+    </div>
+
+  </body>
+</html>
